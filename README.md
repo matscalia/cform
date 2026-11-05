@@ -258,8 +258,12 @@ Same as the TypeScript walker/UI:
   Enter; numeric/string constraints (`minimum`, `maximum`, `integer`,
   `minLength`, `maxLength`, `pattern`), required non-empty strings,
   `minItems`/`maxItems`, records (`additionalProperties` + `propertyNames`),
-  unions (`anyOf`/`oneOf`, nullable → confirm), `$ref`/`$defs` and `allOf`
-  folding;
+  unions (`anyOf`/`oneOf`, nullable → confirm), `$ref`/`$defs`, `allOf`
+  folding, and `if`/`then`/`else`/`not` (conditional properties and required
+  fields are re-evaluated as the object is filled);
+- conditional property order is dependency-sorted: properties referenced by an
+  `if` condition are always prompted before the fields controlled by that
+  condition, regardless of where they appear in `properties`;
 - `patternProperties` whose patterns are plain literal alternations
   (`^(a|b)$`, `^#x\.before$`) become a key picker with per-key typing and a
   `(done)` option;
@@ -284,7 +288,7 @@ Differences from the TypeScript UI are cosmetic: the banner/error prefix says
 | File | Role |
 | --- | --- |
 | `src/json.cpp` | simdjson parsing, ordered JSON value, serialization |
-| `src/schema.cpp` | `$ref`/`allOf`, type inspection, validators, `patternProperties` parser |
+| `src/schema.cpp` | `$ref`/`allOf`, `if`/`then`/`else`/`not`, type inspection, validators, `patternProperties` parser |
 | `src/tui.cpp` | raw-mode terminal, renderer, key parser, prompts, completion |
 | `src/walker.cpp` | schema walker (prompt order, back navigation, history) |
 | `src/main.cpp` | stdin schema → value → stdout |

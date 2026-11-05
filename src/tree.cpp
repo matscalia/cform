@@ -170,7 +170,8 @@ void build_rows(const Json *value, const Json &schema, const Path &path,
 
   // children
   std::vector<Child> children;
-  const Json node = resolve_ref(schema, root_schema);
+  const Json node =
+      apply_conditionals(schema, value ? *value : Json::null(), root_schema);
   const std::string type = primary_type(node, root_schema);
   if ((value && value->is_object()) ||
       (type == "object" && node.has("properties"))) {

@@ -133,6 +133,104 @@ std::size_t utf8_length(const std::string& text) {
   return count;
 }
 
+std::optional<std::string> check_conditionals(const Json& node,
+                                             const Json& value,
+                                             const Json& root) {
+  if (const Json* negated = node.get("not")) {
+    if (validate_value(*negated, value, root).empty())
+      return "must not match the disallowed schema";
+  }
+  if (const Json* condition = node.get("if")) {
+    const bool matched = validate_value(*condition, value, root).empty();
+    if (const Json* branch = node.get(matched ? "then" : "else")) {
+      const std::vector<std::string> errors =
+          validate_value(*branch, value, root);
+      if (!errors.empty()) return errors.front();
+    }
+  }
+  if (const Json* all_of = node.get("allOf"); all_of && all_of->is_array()) {
+    for (const Json& part : all_of->array) {
+      const std::vector<std::string> errors = validate_value(part, value, root);
+      if (!errors.empty()) return errors.front();
+    }
+  }
+  return std::nullopt;
+}
+
+Json combine_schemas(const Json& first, const Json& second) {
+  Json combined = Json::object_value();
+  Json all = Json::array_value();
+  all.push(first);
+  all.push(second);
+  combined.set("allOf", std::move(all));
+  return combined;
+}
+
+void merge_branch(Json& merged, const Json& part) {
+  if (!part.is_object()) return;
+
+  const Json* part_props = part.get("properties");
+  if (part_props && part_props->is_object()) {
+    Json props = Json::object_value();
+    if (const Json* own = merged.get("properties"); own && own->is_object())
+      props = *own;
+    for (const auto& entry : part_props->object) {
+      if (const Json* existing = props.get(entry.first))
+        props.set(entry.first, combine_schemas(*existing, entry.second));
+      else
+        props.set(entry.first, entry.second);
+    }
+    merged.set("properties", std::move(props));
+  }
+
+  const Json* part_patterns = part.get("patternProperties");
+  if (part_patterns && part_patterns->is_object()) {
+    Json patterns = Json::object_value();
+    if (const Json* own = merged.get("patternProperties");
+        own && own->is_object())
+      patterns = *own;
+    for (const auto& entry : part_patterns->object) {
+      if (const Json* existing = patterns.get(entry.first))
+        patterns.set(entry.first, combine_schemas(*existing, entry.second));
+      else
+        patterns.set(entry.first, entry.second);
+    }
+    merged.set("patternProperties", std::move(patterns));
+  }
+
+  const Json* part_required = part.get("required");
+  if (part_required && part_required->is_array()) {
+    std::vector<Json> required;
+    std::set<std::string> seen;
+    if (const Json* own = merged.get("required"); own && own->is_array()) {
+      for (const Json& item : own->array) {
+        if (item.is_string()) seen.insert(item.string);
+        required.push_back(item);
+      }
+    }
+    for (const Json& item : part_required->array) {
+      if (!item.is_string() || seen.count(item.string)) continue;
+      seen.insert(item.string);
+      required.push_back(item);
+    }
+    merged.set("required", Json::array_value(std::move(required)));
+  }
+
+  static const char* keywords[] = {
+      "type",          "items",            "additionalProperties",
+      "propertyNames", "minItems",         "maxItems",
+      "minLength",     "maxLength",        "minimum",
+      "maximum",       "exclusiveMinimum", "exclusiveMaximum",
+      "pattern",       "enum",             "const",
+      "description",   "title",            "default",
+      "format",        "if",               "then",
+      "else",          "not",
+  };
+  for (const char* key : keywords) {
+    if (part.has(key)) merged.set(key, *part.get(key));
+  }
+}
+
 }  // namespace
 
 std::string trim(std::string_view text) {
@@ -191,6 +289,30 @@ Json merge_all_of(const Json& node, const Json& root) {
   Json merged = node;
   merged.erase("allOf");
 
+  Json conditional_parts = Json::array_value();
+  bool has_conditionals = false;
+
+  auto add_conditional = [&](const Json& part) {
+    Json conditional = Json::object_value();
+    bool has = false;
+    for (const char* key : {"if", "then", "else", "not"}) {
+      if (part.has(key)) {
+        conditional.set(key, *part.get(key));
+        has = true;
+      }
+    }
+    if (!has) return;
+    conditional_parts.push(std::move(conditional));
+    has_conditionals = true;
+  };
+
+  auto collect_nested_conditionals = [&](const Json& part) {
+    add_conditional(part);
+    if (const Json* nested = part.get("allOf"); nested && nested->is_array()) {
+      for (const Json& nested_part : nested->array) add_conditional(nested_part);
+    }
+  };
+
   for (const Json& raw_part : all_of->array) {
     const Json part = resolve_ref(raw_part, root);
 
@@ -234,12 +356,220 @@ Json merge_all_of(const Json& node, const Json& root) {
         "maximum",        "exclusiveMinimum", "exclusiveMaximum",
         "pattern",        "enum",        "const",
         "description",    "title",       "default",
+        "format",
     };
     for (const char* key : keywords) {
       if (!merged.has(key) && part.has(key)) merged.set(key, *part.get(key));
     }
+    collect_nested_conditionals(part);
   }
+
+  if (has_conditionals)
+    merged.set("allOf", std::move(conditional_parts));
   return merged;
+}
+
+Json apply_conditionals(const Json& schema, const Json& value,
+                          const Json& root) {
+  Json node = resolve_ref(schema, root);
+  if (!node.is_object()) return node;
+
+  std::set<std::string> forbidden;
+
+  auto collect_forbidden = [&](const Json& negated, auto&& self) -> void {
+    const Json resolved = resolve_ref(negated, root);
+    if (!resolved.is_object()) return;
+    if (const Json* required = resolved.get("required");
+        required && required->is_array()) {
+      for (const Json& item : required->array) {
+        if (item.is_string()) forbidden.insert(item.string);
+      }
+    }
+    for (const char* key : {"anyOf", "oneOf"}) {
+      if (const Json* parts = resolved.get(key); parts && parts->is_array()) {
+        for (const Json& part : parts->array) self(part, self);
+      }
+    }
+  };
+
+  auto apply_one = [&](const Json& conditional) {
+    if (!conditional.is_object()) return;
+    if (const Json* negated = conditional.get("not"))
+      collect_forbidden(*negated, collect_forbidden);
+    const Json* condition = conditional.get("if");
+    if (!condition) return;
+    const bool matched = validate_value(*condition, value, root).empty();
+    if (const Json* branch = conditional.get(matched ? "then" : "else")) {
+      const Json resolved = resolve_ref(*branch, root);
+      merge_branch(node, resolved);
+      if (const Json* negated = resolved.get("not"))
+        collect_forbidden(*negated, collect_forbidden);
+    }
+  };
+
+  apply_one(node);
+  if (const Json* all_of = node.get("allOf"); all_of && all_of->is_array()) {
+    for (const Json& part : all_of->array) apply_one(part);
+  }
+
+  if (!forbidden.empty()) {
+    if (Json* properties = node.find("properties");
+        properties && properties->is_object()) {
+      for (const std::string& key : forbidden) properties->erase(key);
+    }
+    if (Json* required = node.find("required"); required && required->is_array()) {
+      std::vector<Json> kept;
+      for (const Json& item : required->array) {
+        if (item.is_string() && forbidden.count(item.string)) continue;
+        kept.push_back(item);
+      }
+      *required = Json::array_value(std::move(kept));
+    }
+  }
+
+  node.erase("allOf");
+  node.erase("if");
+  node.erase("then");
+  node.erase("else");
+  return node;
+}
+
+namespace {
+
+struct PropertyOrderBuilder {
+  explicit PropertyOrderBuilder(const Json& root_) : root(root_) {}
+
+  const Json& root;
+  std::vector<std::string> nodes;
+  std::set<std::string> seen;
+  std::map<std::string, std::set<std::string>> edges;
+
+  void add_node(const std::string& key) {
+    if (seen.insert(key).second) nodes.push_back(key);
+  }
+
+  void add_edge(const std::string& from, const std::string& to) {
+    if (from != to) edges[from].insert(to);
+  }
+
+  void collect_dependencies(const Json& schema, std::set<std::string>& out) {
+    const Json node = resolve_ref(schema, root);
+    if (!node.is_object()) return;
+    if (const Json* properties = node.get("properties");
+        properties && properties->is_object()) {
+      for (const auto& entry : properties->object) out.insert(entry.first);
+    }
+    if (const Json* required = node.get("required");
+        required && required->is_array()) {
+      for (const Json& item : required->array) {
+        if (item.is_string()) out.insert(item.string);
+      }
+    }
+    for (const char* key : {"allOf", "anyOf", "oneOf"}) {
+      if (const Json* parts = node.get(key); parts && parts->is_array()) {
+        for (const Json& part : parts->array) collect_dependencies(part, out);
+      }
+    }
+    if (const Json* negated = node.get("not"))
+      collect_dependencies(*negated, out);
+    if (const Json* condition = node.get("if"))
+      collect_dependencies(*condition, out);
+    for (const char* key : {"then", "else"}) {
+      if (const Json* branch = node.get(key))
+        collect_dependencies(*branch, out);
+    }
+  }
+
+  std::vector<std::string> collect_level(
+      const Json& schema, const std::vector<std::string>& inherited) {
+    const Json node = resolve_ref(schema, root);
+    std::vector<std::string> keys;
+    if (!node.is_object()) return keys;
+
+    if (const Json* properties = node.get("properties");
+        properties && properties->is_object()) {
+      for (const auto& entry : properties->object) {
+        add_node(entry.first);
+        keys.push_back(entry.first);
+        for (const std::string& dependency : inherited)
+          add_edge(dependency, entry.first);
+      }
+    }
+
+    if (const Json* condition = node.get("if")) {
+      std::set<std::string> dependencies;
+      collect_dependencies(*condition, dependencies);
+      std::vector<std::string> next_inherited = inherited;
+      for (const std::string& dependency : dependencies)
+        next_inherited.push_back(dependency);
+      for (const char* key : {"then", "else"}) {
+        if (const Json* branch = node.get(key)) {
+          const std::vector<std::string> branch_keys =
+              collect_level(*branch, next_inherited);
+          keys.insert(keys.end(), branch_keys.begin(), branch_keys.end());
+        }
+      }
+    }
+    if (const Json* all_of = node.get("allOf"); all_of && all_of->is_array()) {
+      for (const Json& part : all_of->array) {
+        const std::vector<std::string> part_keys =
+            collect_level(part, inherited);
+        keys.insert(keys.end(), part_keys.begin(), part_keys.end());
+      }
+    }
+    return keys;
+  }
+
+  std::vector<std::string> order() {
+    std::map<std::string, int> indegree;
+    for (const std::string& node : nodes) indegree[node] = 0;
+    for (const auto& [from, targets] : edges) {
+      if (!indegree.count(from)) continue;
+      for (const std::string& target : targets) {
+        if (indegree.count(target)) indegree[target]++;
+      }
+    }
+
+    std::vector<std::string> result;
+    std::vector<bool> used(nodes.size(), false);
+    while (result.size() < nodes.size()) {
+      bool found = false;
+      for (std::size_t index = 0; index < nodes.size(); index++) {
+        if (used[index] || indegree[nodes[index]] != 0) continue;
+        used[index] = true;
+        result.push_back(nodes[index]);
+        if (const auto outgoing = edges.find(nodes[index]);
+            outgoing != edges.end()) {
+          for (const std::string& target : outgoing->second) {
+            if (indegree.count(target)) indegree[target]--;
+          }
+        }
+        found = true;
+        break;
+      }
+      if (!found) {
+        // A cyclic conditional dependency cannot be ordered; fall back to the
+        // schema order for the remaining nodes.
+        for (std::size_t index = 0; index < nodes.size(); index++) {
+          if (!used[index]) {
+            used[index] = true;
+            result.push_back(nodes[index]);
+          }
+        }
+        break;
+      }
+    }
+    return result;
+  }
+};
+
+}  // namespace
+
+std::vector<std::string> conditional_property_order(const Json& schema,
+                                                    const Json& root) {
+  PropertyOrderBuilder builder{root};
+  builder.collect_level(schema, {});
+  return builder.order();
 }
 
 SchemaTypes schema_types(const Json& schema, const Json& root) {
@@ -262,6 +592,26 @@ SchemaTypes schema_types(const Json& schema, const Json& root) {
     return {"object"};
   }
   if (node.has("items")) return {"array"};
+  if (const Json* all_of = node.get("allOf"); all_of && all_of->is_array()) {
+    std::set<std::string> types;
+    for (const Json& part : all_of->array) {
+      for (const std::string& type : schema_types(part, root)) {
+        if (type != "unknown") types.insert(type);
+      }
+    }
+    if (!types.empty()) return {types.begin(), types.end()};
+  }
+  if (node.has("if")) {
+    std::set<std::string> types;
+    for (const char* branch : {"then", "else"}) {
+      if (const Json* part = node.get(branch)) {
+        for (const std::string& type : schema_types(*part, root)) {
+          if (type != "unknown") types.insert(type);
+        }
+      }
+    }
+    if (!types.empty()) return {types.begin(), types.end()};
+  }
   return {"unknown"};
 }
 
@@ -374,7 +724,6 @@ std::optional<std::string> prefill_string(const Json& prefill) {
 }
 
 Validator validate_string(const Json& node, const Json& root) {
-  (void)root;
   std::optional<std::regex> pattern;
   if (const Json* raw_pattern = node.get("pattern");
       raw_pattern && raw_pattern->is_string()) {
@@ -402,12 +751,14 @@ Validator validate_string(const Json& node, const Json& root) {
     if (pattern && !std::regex_search(value, *pattern)) {
       return "must match " + pattern_text;
     }
+    if (const auto error =
+            check_conditionals(node, Json::string_value(value), root))
+      return error;
     return std::nullopt;
   };
 }
 
 Validator validate_number(const Json& node, const Json& root) {
-  (void)root;
   const bool wants_integer = string_or(node.get("type")) == "integer";
   double minimum = 0, maximum = 0, exclusive_minimum = 0, exclusive_maximum = 0;
   const bool has_minimum = has_number(node, "minimum", minimum);
@@ -443,6 +794,10 @@ Validator validate_number(const Json& node, const Json& root) {
              number_to_string(exclusive_maximum,
                               exclusive_maximum == std::floor(exclusive_maximum));
     }
+    const bool integer = std::floor(parsed) == parsed;
+    if (const auto error =
+            check_conditionals(node, Json::number_value(parsed, integer), root))
+      return error;
     return std::nullopt;
   };
 }
@@ -450,16 +805,35 @@ Validator validate_number(const Json& node, const Json& root) {
 std::vector<std::string> validate_value(const Json& schema, const Json& value,
                                         const Json& root) {
   const Json node = resolve_ref(schema, root);
+  if (!node.is_object()) {
+    if (node.is_bool() && !node.boolean)
+      return {"does not match the false schema"};
+    return {};
+  }
   std::vector<std::string> errors;
 
-  const Json* variants = node.get("anyOf");
-  if (!variants) variants = node.get("oneOf");
-  if (variants && variants->is_array()) {
-    for (const Json& variant : variants->array) {
-      if (validate_value(variant, value, root).empty()) return {};
+  if (const Json* any_of = node.get("anyOf"); any_of && any_of->is_array()) {
+    bool matched = false;
+    for (const Json& variant : any_of->array) {
+      if (validate_value(variant, value, root).empty()) {
+        matched = true;
+        break;
+      }
     }
-    errors.push_back("does not match any of the allowed variants");
-    return errors;
+    if (!matched) {
+      errors.push_back("does not match any of the allowed variants");
+      return errors;
+    }
+  }
+  if (const Json* one_of = node.get("oneOf"); one_of && one_of->is_array()) {
+    std::size_t matches = 0;
+    for (const Json& variant : one_of->array) {
+      if (validate_value(variant, value, root).empty()) matches++;
+    }
+    if (matches != 1) {
+      errors.push_back("must match exactly one of the allowed variants");
+      return errors;
+    }
   }
 
   if (const Json* constant = node.get("const")) {
@@ -591,6 +965,10 @@ std::vector<std::string> validate_value(const Json& schema, const Json& value,
         }
       }
     }
+  }
+  if (!value.is_string() && !value.is_number()) {
+    if (const auto error = check_conditionals(node, value, root))
+      errors.push_back(*error);
   }
   return errors;
 }

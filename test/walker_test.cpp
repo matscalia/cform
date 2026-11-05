@@ -1,5 +1,6 @@
 // Behaviour tests for the cform walker (no TTY needed: a scripted prompter is
 // injected). Mirrors the TypeScript test suite.
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -595,6 +596,199 @@ void test_validate_value() {
         validate_value(nullable, Json::null(), nullable).empty());
 }
 
+void test_conditionals_validation() {
+  const Json schema = parse(R"({
+    "type":"object",
+    "properties":{"kind":{"enum":["a","b"]}},
+    "if":{"properties":{"kind":{"const":"a"}},"required":["kind"]},
+    "then":{"properties":{"aValue":{"type":"string"}},"required":["aValue"]},
+    "else":{"properties":{"bValue":{"type":"number"}},"required":["bValue"]}
+  })");
+  check("if/then/else: then valid",
+        validate_value(schema, parse(R"({"kind":"a","aValue":"x"})"), schema).empty());
+  check("if/then/else: then missing",
+        !validate_value(schema, parse(R"({"kind":"a"})"), schema).empty());
+  check("if/then/else: else valid",
+        validate_value(schema, parse(R"({"kind":"b","bValue":1})"), schema).empty());
+  check("if/then/else: else missing",
+        !validate_value(schema, parse(R"({"kind":"b"})"), schema).empty());
+
+  const Json not_schema = parse(R"({"type":"string","not":{"enum":["x"]}})");
+  check("not: rejects", !validate_value(not_schema, Json::string_value("x"), not_schema).empty());
+  check("not: accepts", validate_value(not_schema, Json::string_value("y"), not_schema).empty());
+  check("not: prompt validator rejects",
+        validate_string(not_schema, not_schema)("x").has_value());
+  check("not: prompt validator accepts",
+        !validate_string(not_schema, not_schema)("y").has_value());
+
+  const Json allof_conditionals = parse(R"({
+    "type":"object",
+    "properties":{
+      "backend":{"enum":["pi","opencode"]},
+      "pi":{"type":"object"},
+      "opencode":{"type":"object"}
+    },
+    "allOf":[
+      {"if":{"required":["backend"],"properties":{"backend":{"const":"pi"}}},
+       "then":{"required":["pi"]},
+       "else":{"not":{"required":["pi"]}}},
+      {"if":{"required":["backend"],"properties":{"backend":{"const":"opencode"}}},
+       "then":{"required":["opencode"]},
+       "else":{"not":{"required":["opencode"]}}}
+    ]
+  })");
+  check("allOf conditionals: pi backend with pi",
+        validate_value(allof_conditionals,
+                       parse(R"({"backend":"pi","pi":{}})"),
+                       allof_conditionals)
+            .empty());
+  check("allOf conditionals: pi backend with opencode",
+        !validate_value(allof_conditionals,
+                        parse(R"({"backend":"pi","opencode":{}})"),
+                        allof_conditionals)
+             .empty());
+  check("allOf conditionals: opencode backend with opencode",
+        validate_value(allof_conditionals,
+                       parse(R"({"backend":"opencode","opencode":{}})"),
+                       allof_conditionals)
+            .empty());
+  check("allOf conditionals: pi backend without pi",
+        !validate_value(allof_conditionals, parse(R"({"backend":"pi"})"),
+                        allof_conditionals)
+             .empty());
+
+  const Json any_not = parse(R"({"anyOf":[{"type":"string"}],"not":{"const":"x"}})");
+  check("not with anyOf: rejects",
+        !validate_value(any_not, Json::string_value("x"), any_not).empty());
+  check("not with anyOf: accepts",
+        validate_value(any_not, Json::string_value("y"), any_not).empty());
+
+  const Json one_of = parse(
+      R"({"oneOf":[{"type":"number"},{"type":"integer"}]})");
+  check("oneOf: multiple matches are rejected",
+        !validate_value(one_of, Json::number_value(1, true), one_of).empty());
+  check("oneOf: single match is accepted",
+        validate_value(one_of, Json::number_value(1.5, false), one_of).empty());
+}
+
+void test_conditionals_prompting() {
+  const Json schema = parse(R"({
+    "type":"object",
+    "required":["kind"],
+    "properties":{"kind":{"type":"string","enum":["a","b"]}},
+    "if":{"properties":{"kind":{"const":"a"}},"required":["kind"]},
+    "then":{"properties":{"aValue":{"type":"string"}},"required":["aValue"]},
+    "else":{"properties":{"bValue":{"type":"number"}},"required":["bValue"]}
+  })");
+
+  Script then_script;
+  then_script.select["select kind"] = {0};
+  then_script.text["aValue"] = {{false, "x"}};
+  const Run then_result = run(schema, then_script);
+  check("if/then/else prompt: then branch field is prompted",
+        same(then_result.value, parse(R"({"kind":"a","aValue":"x"})")));
+
+  Script else_script;
+  else_script.select["select kind"] = {1};
+  else_script.text["bValue"] = {{false, "7"}};
+  const Run else_result = run(schema, else_script);
+  check("if/then/else prompt: else branch field is prompted",
+        same(else_result.value, parse(R"({"kind":"b","bValue":7})")));
+
+  auto prompt_index = [](const std::vector<LogEntry>& log,
+                         const std::string& message) {
+    for (std::size_t index = 0; index < log.size(); index++) {
+      if (log[index].message == message) return static_cast<int>(index);
+    }
+    return -1;
+  };
+  const int then_condition =
+      prompt_index(then_result.prompter->log(), "select kind");
+  const int then_branch = prompt_index(then_result.prompter->log(), "aValue");
+  check("if/then/else prompt: then condition is asked first",
+        then_condition >= 0 && then_branch > then_condition);
+  const int else_condition =
+      prompt_index(else_result.prompter->log(), "select kind");
+  const int else_branch = prompt_index(else_result.prompter->log(), "bValue");
+  check("if/then/else prompt: else condition is asked first",
+        else_condition >= 0 && else_branch > else_condition);
+
+  const Json reordered = parse(R"({
+    "type":"object",
+    "properties":{
+      "aValue":{"type":"string"},
+      "kind":{"type":"string","enum":["a","b"]}
+    },
+    "required":["kind"],
+    "if":{"properties":{"kind":{"const":"a"}},"required":["kind"]},
+    "then":{"properties":{"aValue":{"type":"string"}},"required":["aValue"]}
+  })");
+  Script reordered_script;
+  reordered_script.select["select kind"] = {0};
+  reordered_script.text["aValue"] = {{false, "x"}};
+  const Run reordered_result = run(reordered, reordered_script);
+  check("if/then/else prompt: condition reorders before base property",
+        same(reordered_result.value, parse(R"({"kind":"a","aValue":"x"})")));
+  const int reordered_condition =
+      prompt_index(reordered_result.prompter->log(), "select kind");
+  const int reordered_branch =
+      prompt_index(reordered_result.prompter->log(), "aValue");
+  check("if/then/else prompt: condition is asked before reordered branch field",
+        reordered_condition >= 0 && reordered_branch > reordered_condition);
+
+  const Json mutual = parse(R"({
+    "type":"object",
+    "required":["backend"],
+    "properties":{
+      "backend":{"enum":["pi","opencode"]},
+      "pi":{"type":"object","required":["user"],
+            "properties":{"user":{"type":"string"}}},
+      "opencode":{"type":"object","required":["user"],
+                  "properties":{"user":{"type":"string"}}}
+    },
+    "allOf":[
+      {"if":{"required":["backend"],
+             "properties":{"backend":{"const":"pi"}}},
+       "then":{"required":["pi"]},
+       "else":{"not":{"required":["pi"]}}},
+      {"if":{"required":["backend"],
+             "properties":{"backend":{"const":"opencode"}}},
+       "then":{"required":["opencode"]},
+       "else":{"not":{"required":["opencode"]}}}
+    ]
+  })");
+  Script mutual_pi_script;
+  mutual_pi_script.select["select backend"] = {0};
+  mutual_pi_script.text["pi.user"] = {{false, "u"}};
+  const Run mutual_pi = run(mutual, mutual_pi_script);
+  check("mutual exclusion prompt: pi branch",
+        same(mutual_pi.value, parse(R"({"backend":"pi","pi":{"user":"u"}})")));
+  check("mutual exclusion prompt: opencode not offered with pi",
+        prompt_index(mutual_pi.prompter->log(), "set opencode?") < 0 &&
+            prompt_index(mutual_pi.prompter->log(), "opencode.user") < 0);
+
+  Script mutual_opencode_script;
+  mutual_opencode_script.select["select backend"] = {1};
+  mutual_opencode_script.text["opencode.user"] = {{false, "u"}};
+  const Run mutual_opencode = run(mutual, mutual_opencode_script);
+  check(
+      "mutual exclusion prompt: opencode branch",
+      same(mutual_opencode.value,
+           parse(R"({"backend":"opencode","opencode":{"user":"u"}})")));
+  check("mutual exclusion prompt: pi not offered with opencode",
+        prompt_index(mutual_opencode.prompter->log(), "set pi?") < 0 &&
+            prompt_index(mutual_opencode.prompter->log(), "pi.user") < 0);
+
+  const std::vector<TreeRow> rows =
+      build_tree_rows(parse(R"({"kind":"a"})"), schema, {});
+  std::vector<std::string> labels;
+  for (const TreeRow& row : rows) labels.push_back(row.label);
+  check("if/then/else tree: active branch row is listed",
+        std::find(labels.begin(), labels.end(), "aValue") != labels.end());
+  check("if/then/else tree: inactive branch row is hidden",
+        std::find(labels.begin(), labels.end(), "bValue") == labels.end());
+}
+
 void test_document_seed() {
   const Json root = parse(R"({
     "type": "object",
@@ -1000,6 +1194,8 @@ int main() {
   test_number_constraints();
   test_allof_and_refs();
   test_validate_value();
+  test_conditionals_validation();
+  test_conditionals_prompting();
   test_document_seed();
   test_document_overrides_autocomplete();
   test_ctrl_f_persists_partial_answers();

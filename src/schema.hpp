@@ -20,6 +20,17 @@ Json resolve_ref(const Json& schema, const Json& root,
                  std::set<std::string> seen = {});
 Json merge_all_of(const Json& node, const Json& root);
 
+/// Applies `if`/`then`/`else` to `node` for the given instance value. The
+/// returned schema has the `if`/`then`/`else` keywords removed and the selected
+/// branch's properties/required merged in.
+Json apply_conditionals(const Json& schema, const Json& value, const Json& root);
+
+/// Returns every property that can be prompted at this object level (base and
+/// all conditional branches), topologically ordered so `if` dependencies are
+/// asked before the fields they control.
+std::vector<std::string> conditional_property_order(const Json& schema,
+                                                    const Json& root);
+
 SchemaTypes schema_types(const Json& schema, const Json& root);
 std::string primary_type(const Json& schema, const Json& root);
 bool is_null_variant(const Json& schema, const Json& root);

@@ -402,23 +402,13 @@ Outcome Walker::property(const Json& parent, const std::string& key,
 
 Outcome Walker::object(const Json& schema, const Path& path,
                        const ValueOptions& options) {
-  const Json node = resolve_ref(schema, root_);
-  const Json* properties_ptr = node.get("properties");
-  const std::vector<std::pair<std::string, Json>> properties =
-      properties_ptr && properties_ptr->is_object()
-          ? properties_ptr->object
-          : std::vector<std::pair<std::string, Json>>{};
-  std::set<std::string> required;
-  if (const Json* required_list = node.get("required");
-      required_list && required_list->is_array()) {
-    for (const Json& item : required_list->array) {
-      if (item.is_string()) required.insert(item.string);
-    }
-  }
+  const Json base = resolve_ref(schema, root_);
   const Json prefill = options.prefill && options.prefill->is_object()
                            ? *options.prefill
                            : Json::object_value();
   Json result = options.resume || options.seed ? prefill : Json::object_value();
+
+  Json node = apply_conditionals(base, result, root_);
 
   if (path.segments.size() >= 1 && path.segments.size() <= 2) {
     if (const auto description = full_hint(node)) {
@@ -426,12 +416,42 @@ Outcome Walker::object(const Json& schema, const Path& path,
     }
   }
 
-  std::size_t index =
-      options.resume && !properties.empty() ? properties.size() - 1 : 0;
+  const std::vector<std::string> property_order =
+      conditional_property_order(base, root_);
+  std::size_t index = 0;
+  if (options.resume) {
+    const Json* active = node.get("properties");
+    for (std::size_t candidate = property_order.size(); candidate > 0;
+         candidate--) {
+      if (active && active->is_object() &&
+          active->has(property_order[candidate - 1])) {
+        index = candidate - 1;
+        break;
+      }
+    }
+  }
   bool resume = options.resume;
-  while (index < properties.size()) {
-    const auto& [key, property_schema] = properties[index];
-    (void)property_schema;
+  while (index < property_order.size()) {
+    node = apply_conditionals(base, result, root_);
+    const std::string key = property_order[index];
+    const Json* current_properties = node.get("properties");
+    const Json* current_schema =
+        current_properties ? current_properties->get(key) : nullptr;
+    if (!current_schema) {
+      // A conditional branch changed and this property is no longer part of
+      // the applicable schema.
+      index++;
+      continue;
+    }
+
+    std::set<std::string> required;
+    if (const Json* required_list = node.get("required");
+        required_list && required_list->is_array()) {
+      for (const Json& item : required_list->array) {
+        if (item.is_string()) required.insert(item.string);
+      }
+    }
+
     std::optional<Json> previous;
     if (const Json* existing = result.get(key)) previous = *existing;
     else if (const Json* seeded = prefill.get(key)) previous = *seeded;
@@ -453,13 +473,21 @@ Outcome Walker::object(const Json& schema, const Path& path,
     index++;
   }
 
+  node = apply_conditionals(base, result, root_);
   const auto pattern = pattern_keys(node);
   if (!pattern) return Outcome::of(result);
 
+  std::set<std::string> final_required;
+  if (const Json* required_list = node.get("required");
+      required_list && required_list->is_array()) {
+    for (const Json& item : required_list->array) {
+      if (item.is_string()) final_required.insert(item.string);
+    }
+  }
   std::vector<std::string> required_pattern;
   std::vector<std::string> optional_pattern;
   for (const std::string& key : pattern->keys) {
-    if (required.count(key)) required_pattern.push_back(key);
+    if (final_required.count(key)) required_pattern.push_back(key);
     else optional_pattern.push_back(key);
   }
   for (const std::string& key : required_pattern) {
@@ -513,7 +541,11 @@ Outcome Walker::object(const Json& schema, const Path& path,
 
 Outcome Walker::array(const Json& schema, const Path& path,
                       const ValueOptions& options) {
-  const Json node = resolve_ref(schema, root_);
+  const Json base = resolve_ref(schema, root_);
+  const Json seed_value = options.prefill && options.prefill->is_array()
+                              ? *options.prefill
+                              : Json::array_value();
+  const Json node = apply_conditionals(base, seed_value, root_);
   const Json* items_ptr = node.get("items");
   Json item;
   if (!items_ptr) return Outcome::of(Json::array_value());
@@ -877,13 +909,18 @@ Outcome Walker::value(const Json& schema, const Path& path,
 
 Outcome Walker::dispatch(const Json& schema, const Path& path,
                          const ValueOptions& options) {
-  const Json node = resolve_ref(schema, root_);
+  const Json base = resolve_ref(schema, root_);
+  const Json representative = options.prefill.value_or(Json::null());
+  const Json node = apply_conditionals(base, representative, root_);
   if (const auto variants = union_variants(node, root_)) {
     return union_value(*variants, path, options);
   }
   const std::string type = primary_type(node, root_);
+  const bool conditional = base.has("if") || base.has("then") ||
+                           base.has("else");
   if (type == "object") {
-    if (node.has("properties") || node.has("patternProperties")) {
+    if (node.has("properties") || node.has("patternProperties") ||
+        conditional) {
       return object(schema, path, options);
     }
     const Json* additional = node.get("additionalProperties");
@@ -899,7 +936,7 @@ Outcome Walker::dispatch(const Json& schema, const Path& path,
     return inferred_object(path, Json::object_value());
   }
   if (type == "array") {
-    if (!node.has("items")) {
+    if (!node.has("items") && !conditional) {
       if (options.prefill) return inferred(path, options.prefill);
       return inferred_array(path, Json::array_value());
     }
