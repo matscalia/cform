@@ -29,9 +29,6 @@ std::optional<std::vector<Json>> union_variants(const Json& schema,
 std::string trim(std::string_view text);
 std::string collapse_whitespace(std::string_view text);
 std::optional<std::string> full_hint(const Json& node);
-std::optional<std::string> inline_hint(const Json& raw_schema,
-                                       const Json& root,
-                                       std::size_t max = 110);
 std::optional<std::string> with_default_hint(
     const std::optional<std::string>& hint, const Json& raw_property,
     const Json& root, bool show = true);

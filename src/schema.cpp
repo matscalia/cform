@@ -303,28 +303,6 @@ std::optional<std::string> full_hint(const Json& node) {
   return text;
 }
 
-std::optional<std::string> inline_hint(const Json& raw_schema, const Json& root,
-                                       std::size_t max) {
-  const Json node = resolve_ref(raw_schema, root);
-  const Json* description = raw_schema.get("description");
-  if (!description) description = node.get("description");
-  if (!description || !description->is_string()) return std::nullopt;
-  const std::string flat = collapse_whitespace(description->string);
-  if (flat.empty()) return std::nullopt;
-  // first sentence: up to the first ". " (JS lookbehind split)
-  std::string sentence = flat;
-  for (std::size_t index = 0; index + 1 < flat.size(); index++) {
-    if (flat[index] == '.' && std::isspace(static_cast<unsigned char>(flat[index + 1]))) {
-      sentence = flat.substr(0, index + 1);
-      break;
-    }
-  }
-  if (sentence.size() > max) {
-    sentence = sentence.substr(0, max - 1) + "…";
-  }
-  return sentence;
-}
-
 std::optional<std::string> with_default_hint(
     const std::optional<std::string>& hint, const Json& raw_property,
     const Json& root, bool show) {

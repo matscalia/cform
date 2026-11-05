@@ -373,9 +373,9 @@ Outcome Walker::property(const Json& parent, const std::string& key,
     }
     ConfirmPrompt prompt;
     prompt.message = "set " + path_label(path) + "?";
-    prompt.hint =
-        with_default_hint(inline_hint(*property_schema, root_), *property_schema,
-                          root_);
+    prompt.hint = with_default_hint(
+        full_hint(resolve_ref(*property_schema, root_)), *property_schema,
+        root_);
     prompt.initial = initial_value;
     const auto reply = prompter_.confirm(prompt);
     if (reply.back) return Outcome::back();
@@ -486,7 +486,7 @@ Outcome Walker::object(const Json& schema, const Path& path,
       Option option;
       option.label = key;
       const Json value_schema = pattern->schemas.at(key);
-      if (const auto hint = inline_hint(value_schema, root_)) {
+      if (const auto hint = full_hint(resolve_ref(value_schema, root_))) {
         option.hint = hint;
       } else {
         option.hint = join_types(schema_types(value_schema, root_));
@@ -531,7 +531,7 @@ Outcome Walker::array(const Json& schema, const Path& path,
     maximum = static_cast<long>(value->number);
   }
   const std::string label = path_label(path);
-  const auto hint = inline_hint(item, root_);
+  const auto hint = full_hint(resolve_ref(item, root_));
 
   std::vector<Json> values;
   if (options.prefill && options.prefill->is_array()) values = options.prefill->array;
@@ -644,7 +644,7 @@ Outcome Walker::record(const Json& schema, const Path& path,
   for (;;) {
     TextPrompt key_prompt;
     key_prompt.message = "key for " + label;
-    if (const auto hint = inline_hint(node, root_)) key_prompt.hint = hint;
+    if (const auto hint = full_hint(node)) key_prompt.hint = hint;
     key_prompt.validate = [&](const std::string& value) -> std::optional<std::string> {
       const std::string text = trim(value);
       if (text.empty()) return "a key is required";
@@ -714,7 +714,7 @@ Outcome Walker::union_value(const std::vector<Json>& variants, const Path& path,
   for (const Json& variant : values) {
     Option option;
     option.label = variant_label(variant, root_);
-    option.hint = inline_hint(variant, root_);
+    option.hint = full_hint(resolve_ref(variant, root_));
     prompt.options.push_back(std::move(option));
   }
   prompt.initial_index =

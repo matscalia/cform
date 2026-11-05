@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "artwork.hpp"
 #include "json.hpp"
 #include "schema.hpp"
 #include "tree.hpp"
@@ -839,6 +840,149 @@ void test_tree_pattern_rows() {
         rows[3].error == "unknown property");
 }
 
+void test_artwork() {
+  check("artwork: ansi-aware cell width",
+        artwork_cell_width("\x1b[31mab\x1b[0m") == 2);
+  check("artwork: utf-8 counts as one cell",
+        artwork_cell_width("\xe2\x96\x80") == 1);
+
+  const auto artwork = make_artwork("ab\r\nc\n", 4);
+  check("artwork: parsed", artwork.has_value());
+  check("artwork: resolved width", artwork->width == 4);
+  check("artwork: resolved height", artwork->height == 2);
+  check("artwork: padded lines",
+        artwork->lines == std::vector<std::string>{"ab  ", "c   "});
+  check("artwork: empty input", !make_artwork("").has_value());
+
+  auto strip = [](const std::string& text) {
+    std::string out;
+    for (std::size_t index = 0; index < text.size();) {
+      if (text[index] == '\x1b' && index + 1 < text.size() &&
+          text[index + 1] == '[') {
+        index += 2;
+        while (index < text.size()) {
+          const char code = text[index++];
+          if (code >= '@' && code <= '~') break;
+        }
+        continue;
+      }
+      out += text[index++];
+    }
+    return out;
+  };
+
+  Artwork captioned;
+  captioned.width = 6;
+  captioned.height = 1;
+  captioned.lines = {"abcdef"};
+  ArtworkLayout layout;
+  layout.caption = "hi";
+  layout.caption_position = 1.0f;
+  layout.caption_align = ArtworkAlign::Center;
+  layout.caption_padding = 0;
+  apply_artwork_caption(captioned, layout);
+  check("artwork: caption keeps the width",
+        artwork_cell_width(captioned.lines[0]) == 6);
+  check("artwork: caption is centered", strip(captioned.lines[0]) == "  hi  ");
+
+  Artwork clipped;
+  clipped.width = 4;
+  clipped.height = 1;
+  clipped.lines = {"abcd"};
+  layout.caption = "hello";
+  layout.caption_align = ArtworkAlign::Left;
+  apply_artwork_caption(clipped, layout);
+  check("artwork: caption is clipped", strip(clipped.lines[0]) == "hell");
+
+  Artwork multi;
+  multi.width = 4;
+  multi.height = 3;
+  multi.lines = {"1111", "2222", "3333"};
+  layout.caption = "x\ny";
+  layout.caption_position = 1.0f;
+  apply_artwork_caption(multi, layout);
+  check("artwork: bottom caption rows",
+        strip(multi.lines[0]) == "1111" && strip(multi.lines[1]) == "x   " &&
+            strip(multi.lines[2]) == "y   ");
+
+  multi.lines = {"1111", "2222", "3333"};
+  layout.caption_position = 0.0f;
+  apply_artwork_caption(multi, layout);
+  check("artwork: top caption rows",
+        strip(multi.lines[0]) == "x   " && strip(multi.lines[1]) == "y   " &&
+            strip(multi.lines[2]) == "3333");
+
+  multi.lines = {"1111", "2222", "3333"};
+  layout.caption = "c";
+  layout.caption_position = 0.5f;
+  apply_artwork_caption(multi, layout);
+  check("artwork: centered caption row",
+        strip(multi.lines[0]) == "1111" && strip(multi.lines[1]) == "c   " &&
+            strip(multi.lines[2]) == "3333");
+
+  multi.lines = {"1111", "2222", "3333"};
+  layout.caption_position = 0.75f;
+  apply_artwork_caption(multi, layout);
+  check("artwork: fractional caption row",
+        strip(multi.lines[0]) == "1111" && strip(multi.lines[1]) == "2222" &&
+            strip(multi.lines[2]) == "c   ");
+
+  Artwork preserved;
+  preserved.width = 4;
+  preserved.height = 1;
+  preserved.lines = {"\x1b[0m\x1b[38;2;1;2;3m\x1b[48;2;4;5;6mabcd"};
+  layout.caption = "X";
+  layout.caption_position = 0.0f;
+  layout.caption_align = ArtworkAlign::Left;
+  layout.caption_padding = 0;
+  layout.caption_bg = -1;
+  layout.caption_fg = 0xFFFFFF;
+  apply_artwork_caption(preserved, layout);
+  check("artwork: caption keeps the image background",
+        preserved.lines[0].find("48;2;4;5;6") != std::string::npos);
+  check("artwork: caption overlays the first glyph",
+        strip(preserved.lines[0]) == "Xbcd");
+  check("artwork: caption cell width unchanged",
+        artwork_cell_width(preserved.lines[0]) == 4);
+
+  preserved.lines = {"\x1b[0m\x1b[38;2;1;2;3m\x1b[48;2;4;5;6mabcd"};
+  layout.caption_fg = -1;
+  apply_artwork_caption(preserved, layout);
+  check("artwork: caption keeps the image foreground",
+        preserved.lines[0].find("38;2;1;2;3") != std::string::npos);
+
+  preserved.lines = {"\x1b[0m\x1b[38;2;1;2;3m\x1b[48;2;4;5;6mabcd"};
+  layout.caption_fg = 0xFFFFFF;
+  layout.caption_bg = -1;
+  layout.caption_bold = true;
+  layout.caption_italic = true;
+  apply_artwork_caption(preserved, layout);
+  check("artwork: styled caption keeps the image background",
+        preserved.lines[0].find("48;2;4;5;6") != std::string::npos);
+  check("artwork: caption bold", 
+        preserved.lines[0].find("\x1b[1m") != std::string::npos);
+  check("artwork: caption italic",
+        preserved.lines[0].find("\x1b[3m") != std::string::npos);
+  check("artwork: caption style reset",
+        preserved.lines[0].find("\x1b[22m") != std::string::npos &&
+            preserved.lines[0].find("\x1b[23m") != std::string::npos);
+
+  Artwork styled;
+  styled.width = 6;
+  styled.height = 1;
+  styled.lines = {"abcdef"};
+  layout.caption = "hi";
+  layout.caption_position = 1.0f;
+  layout.caption_align = ArtworkAlign::Center;
+  layout.caption_padding = 0;
+  layout.caption_bg = 0x000000;
+  apply_artwork_caption(styled, layout);
+  check("artwork: solid caption bold/italic",
+        styled.lines[0].find("\x1b[1m") != std::string::npos &&
+            styled.lines[0].find("\x1b[3m") != std::string::npos &&
+            strip(styled.lines[0]) == "  hi  ");
+}
+
 }  // namespace
 
 int main() {
@@ -863,6 +1007,7 @@ int main() {
   test_tree_paths();
   test_tree_rows();
   test_tree_pattern_rows();
+  test_artwork();
 
   std::cout << "\n" << (checks - failures) << "/" << checks << " passed\n";
   return failures == 0 ? 0 : 1;

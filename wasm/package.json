@@ -1,0 +1,21 @@
+{
+  "name": "cform",
+  "version": "0.1.0",
+  "description": "Schema-driven JSON prompt UI (C++ WebAssembly module with Node bindings)",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "build/cform.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chafa-wasm": "^0.3.3"
+  },
+  "scripts": {
+    "build": "emcmake cmake -S .. -B ../build-wasm -DCMAKE_BUILD_TYPE=Release && cmake --build ../build-wasm"
+  }
+}

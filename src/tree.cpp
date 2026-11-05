@@ -216,7 +216,7 @@ std::string render_row(const TreeRow &row, bool cursor) {
   }
   std::string diagnostics;
   if (!row.error.empty()) {
-    diagnostics = " " + red("error: " + row.error);
+    diagnostics = " " + red("󰀪 ") + " " + row.error;
   } else if (row.present && row.valid) {
     diagnostics = " " + green("✓");
   }
@@ -406,7 +406,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
     lines.push_back(footer(
         " ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+f:tree  q:done ",
         std::to_string(cursor + 1) + "/" + std::to_string(rows.size()), width));
-    ui.render_lines(lines);
+    ui.render_lines(lines, true, true);
 
     const Key key = ui.read_key();
     if (key.ctrl && key.name == "c")
@@ -467,6 +467,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       std::optional<Json> prefill;
       if (row.present)
         prefill = row.value;
+      ui.begin_prompts();
       try {
         const Outcome outcome =
             walker.value(row.schema, row.path,
@@ -485,6 +486,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       } catch (const TreeJump &) {
         // ctrl+f: keep the previous value and go back to the tree
       }
+      ui.end_prompts();
       continue;
     }
   }

@@ -30,6 +30,119 @@ cmake --build cform/build
 simdjson is located through `pkg-config` (`simdjson.pc`). On Debian/Ubuntu:
 `apt install libsimdjson-dev`; on macOS: `brew install simdjson`.
 
+If `libchafa` is found through `pkg-config` (`chafa.pc`), the native CLI also
+supports `--image` (rendered with chafa; stb_image, fetched through CMake
+`FetchContent`, decodes the file). On Debian/Ubuntu: `apt install libchafa-dev`; on macOS:
+`brew install chafa`. Without it the build still works, just without images.
+`FetchContent` pins `nothings/stb`; for an offline build, pre-populate it and
+pass `-DFETCHCONTENT_SOURCE_DIR_STB=/path/to/stb`.
+
+## Node / WebAssembly
+
+The prompt UI can also be built as a single-file WebAssembly module with Node
+bindings in `wasm/`. This build does not need simdjson: `src/json_parse.cpp`
+is the parser used by wasm.
+
+Requires Emscripten (with `emcmake` on `PATH`) and Node ≥ 18.
+
+```bash
+emcmake cmake -S . -B build-wasm -DCMAKE_BUILD_TYPE=Release
+cmake --build build-wasm
+```
+
+This writes `wasm/build/cform.js` (wasm embedded, ~800 KB). Then:
+
+```js
+const { loadCform } = require('./wasm');
+
+const cform = await loadCform();   // no TTY needed yet
+const value = cform.run(schema);   // blocking; draws the UI, returns JSON
+const edited = cform.run(schema, document);  // with an existing document
+```
+
+`run` returns the parsed value and throws on cancel/error. Use
+`runToString(schema, document?)` for the JSON text, or
+`runResult(schema, document?)` for `{ ok, cancelled, value, error }`.
+
+Images use the same libchafa as the CLI, via the `chafa-wasm` package:
+
+```js
+const cform = await loadCform({ image: 'logo.png' });
+// or, rendered before a later run:
+await cform.prepareImage('logo.png');
+cform.clearImage();
+```
+
+The image is right-aligned inside the frame only when the terminal has room
+for it **and** it is at least `imageMinWidth` x `imageMinHeight` cells. It is
+truncated from the UI area, which keeps at least `imageMinContentWidth` cells
+(default 40). `imageWidth`/`imageHeight` set the rendered size (or one of
+them, in which case the other keeps the source aspect ratio);
+`imageMaxWidth`/`imageMaxHeight` are optional caps (0 = no cap), and `imageGap`
+and `imageMargin` control the spacing. The renderer keeps the image's aspect ratio
+(assuming the usual 0.5 terminal cell width/height ratio). In `right` placement
+the image is sized to the full TUI height (terminal rows minus one), bounded by
+the side-panel width, so the rendered block and the image share the same height.
+In `above` placement it uses up to half the terminal height so the prompt still
+fits. With a right-side image, the tree's bottom help/status bar is pinned to
+the bottom of the image block, so both share the same lower edge. During a
+wizard, the prompt history flows in the left column next to the image; once the
+available rows are exhausted the oldest lines scroll off while the image stays
+fixed. Descriptions and prompt hints are word-wrapped to the available width
+rather than truncated. If any UI line would still be shortened by the image, the
+image is re-rendered at a narrower width to make room; it is omitted only when it
+cannot fit even at the minimum size (the tree's compact help/status bar is
+exempt). Set
+`imagePlacement: 'above'` to show the image as a right-aligned block above the
+prompt instead of a side panel (this keeps the footer readable).
+
+A plain-text caption can be drawn inside the image rectangle:
+
+```js
+const cform = await loadCform({
+  image: 'logo.png',
+  imagePlacement: 'above',
+  imageCaption: 'cform\nprompt schemas',
+  imageCaptionPosition: 'bottom', // or 'center', 'top', 'none', or 0..1
+  imageCaptionAlign: 'center',
+  imageCaptionColor: '#ffffff',
+  imageCaptionBackground: '#000000', // or 'none' to keep the image background
+  imageCaptionBold: true,
+  imageCaptionItalic: true,
+});
+```
+
+`imageCaption` is plain text (`\n` for multiple lines). It replaces the
+caption rows of the image with a solid band, so it stays readable over any
+artwork; longer lines are clipped to the image width. `imageCaptionPosition`
+accepts `top`, `center`, `bottom`, `none`, or a number in `0..1` (0 = first row,
+1 = last row). The same options exist as `--image-caption*` CLI flags.
+
+With `imageCaptionBackground: 'none'` (or `--image-caption-bg none`) the caption
+is composited cell-by-cell: the glyphs are replaced but each cell keeps its
+original background color. `imageCaptionColor: 'none'` likewise keeps the
+original foreground; by default the text is white. `imageCaptionBold` and
+`imageCaptionItalic` add font styling (set both for bold italic).
+
+- The UI is written to `stderr` by default, so `stdout` stays free; pass
+  `{ output: process.stdout }`, `{ outputFd: 1 }` or `{ columns }` to
+  `loadCform` to change that.
+- Keys are read from `stdin`, which must be a TTY (Node cannot set raw mode on
+  an arbitrary fd), so run the process attached to a terminal.
+- `{file:...}` / `{lib:...}` completion uses Node's `fs`; multiline prompts use
+  `$VISUAL` / `$EDITOR` (or `options.editor`).
+
+`run` is synchronous and blocks the event loop while the user is prompted —
+call it from a CLI entry point, not from a request handler.
+
+Resizing the terminal triggers an immediate redraw: the layout and text re-wrap
+to the new size, and the artwork is re-rendered and rescaled for the new
+terminal geometry without waiting for a keypress. Width-only and height-only
+resizes are handled independently; if the new aspect would cut text, the image
+is narrowed instead of disappearing.
+
+There is a runnable example: `node wasm/example.js`.
+
 ## Usage
 
 ```
@@ -39,6 +152,31 @@ usage: cform [options] [document]
                     complete are marked with a tick and kept unless selected
   --lib-dir <dir>   root used to complete `{lib:...}` references
   --base-dir <dir>  directory used for relative path completion
+  --image <file>    right-aligned image, when the terminal has room (chafa)
+  --image-min-width <n>, --image-min-height <n>
+                    hide below this rendered cell size (default 8x4)
+  --image-min-content-width <n>
+                    cells kept for the UI (default 40)
+  --image-gap <n>   blank cells between UI and image (default 2)
+  --image-margin <n>
+                    blank cells to the right of the image (default 0)
+  --image-placement <right|above>
+                    side panel or block above the UI (default right)
+  --image-max-width <n>, --image-max-height <n>
+                    optional caps; 0 = no cap (default)
+  --image-caption <text>
+                    plain-text caption drawn over the image
+  --image-caption-position <top|center|bottom|none|0..1>
+                    caption row (default bottom)
+  --image-caption-align <left|center|right>
+                    caption alignment (default center)
+  --image-caption-padding <n>
+                    cells between caption and image edge (default 1)
+  --image-caption-color <rrggbb|none>, --image-caption-bg <rrggbb|none>
+                    caption colors (default ffffff on 000000;
+                    none keeps the image's original color)
+  --image-caption-bold, --image-caption-italic
+                    caption font style (combine for both)
 ```
 
 `orchestra prompt` passes its shipped library path as `--lib-dir`; `--base-dir`

@@ -1,23 +1,15 @@
 #include "tui.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <ctime>
-#include <dirent.h>
-#include <fcntl.h>
 #include <filesystem>
-#include <iostream>
-#include <poll.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <termios.h>
+#include <memory>
+#include <stdexcept>
 #include <unistd.h>
 
 #include "schema.hpp"
+#include "terminal.hpp"
 
 namespace cform {
 
@@ -30,6 +22,11 @@ constexpr const char* CYAN = "\x1b[36m";
 constexpr const char* REVERSE = "\x1b[7m";
 constexpr const char* HIDE_CURSOR = "\x1b[?25l";
 constexpr const char* SHOW_CURSOR = "\x1b[?25h";
+// Synchronized output: terminals that support it present the whole update at
+// once, which removes the clear-and-repaint flicker. Unknown sequences are
+// ignored by terminals that don't.
+constexpr const char* SYNC_START = "\x1b[?2026h";
+constexpr const char* SYNC_END = "\x1b[?2026l";
 
 constexpr int ESCAPE_TIMEOUT_MS = 50;
 constexpr std::size_t MAX_COMPLETIONS = 32;
@@ -41,22 +38,7 @@ std::string cyan(const std::string& text) { return std::string(CYAN) + text + RE
 std::string red(const std::string& text) { return std::string(RED) + text + RESET; }
 
 std::size_t visible_length(const std::string& text) {
-  std::size_t count = 0;
-  for (std::size_t index = 0; index < text.size();) {
-    if (text[index] == '\x1b' && index + 1 < text.size() && text[index + 1] == '[') {
-      index += 2;
-      while (index < text.size() &&
-             !std::isalpha(static_cast<unsigned char>(text[index])) &&
-             text[index] != '~') {
-        index++;
-      }
-      if (index < text.size()) index++;
-      continue;
-    }
-    count++;
-    index++;
-  }
-  return count;
+  return static_cast<std::size_t>(artwork_cell_width(text));
 }
 
 std::string fit_line(const std::string& text, std::size_t columns) {
@@ -64,27 +46,95 @@ std::string fit_line(const std::string& text, std::size_t columns) {
   std::string out;
   std::size_t visible = 0;
   for (std::size_t index = 0; index < text.size();) {
-    if (text[index] == '\x1b' && index + 1 < text.size() && text[index + 1] == '[') {
+    const unsigned char ch = static_cast<unsigned char>(text[index]);
+    if (ch == '\x1b' && index + 1 < text.size() && text[index + 1] == '[') {
       const std::size_t start = index;
       index += 2;
-      while (index < text.size() &&
-             !std::isalpha(static_cast<unsigned char>(text[index])) &&
-             text[index] != '~') {
+      while (index < text.size()) {
+        const unsigned char code = static_cast<unsigned char>(text[index]);
         index++;
+        if (code >= '@' && code <= '~') break;
       }
-      if (index < text.size()) index++;
       out.append(text, start, index - start);
       continue;
     }
+    std::size_t length = 1;
+    if ((ch & 0xE0) == 0xC0) length = 2;
+    else if ((ch & 0xF0) == 0xE0) length = 3;
+    else if ((ch & 0xF8) == 0xF0) length = 4;
+    if (index + length > text.size()) length = 1;
     if (visible + 1 >= columns) {
       out += RESET;
       break;
     }
-    out += text[index];
+    out.append(text, index, length);
     visible++;
-    index++;
+    index += length;
   }
   return out;
+}
+
+std::vector<std::string> wrap_text(std::string_view text, std::size_t width) {
+  if (width < 1) width = 1;
+  std::vector<std::string> lines;
+  std::string line;
+  std::size_t line_cells = 0;
+  std::size_t index = 0;
+  while (index < text.size()) {
+    while (index < text.size() &&
+           std::isspace(static_cast<unsigned char>(text[index])))
+      index++;
+    if (index >= text.size()) break;
+    const std::size_t start = index;
+    while (index < text.size() &&
+           !std::isspace(static_cast<unsigned char>(text[index])))
+      index++;
+    const std::string_view word = text.substr(start, index - start);
+    const std::size_t word_cells =
+        static_cast<std::size_t>(artwork_cell_width(word));
+
+    if (line_cells > 0 && line_cells + 1 + word_cells <= width) {
+      line += ' ';
+      line += word;
+      line_cells += 1 + word_cells;
+      continue;
+    }
+    if (line_cells == 0 && word_cells <= width) {
+      line.assign(word);
+      line_cells = word_cells;
+      continue;
+    }
+    if (line_cells > 0) {
+      lines.push_back(line);
+      line.clear();
+      line_cells = 0;
+    }
+
+    // Break a word that is wider than the available columns.
+    std::string chunk;
+    std::size_t chunk_cells = 0;
+    for (std::size_t word_index = 0; word_index < word.size();) {
+      const unsigned char ch = static_cast<unsigned char>(word[word_index]);
+      std::size_t length = 1;
+      if ((ch & 0xE0) == 0xC0) length = 2;
+      else if ((ch & 0xF0) == 0xE0) length = 3;
+      else if ((ch & 0xF8) == 0xF0) length = 4;
+      if (word_index + length > word.size()) length = 1;
+      if (chunk_cells + 1 > width) {
+        lines.push_back(chunk);
+        chunk.clear();
+        chunk_cells = 0;
+      }
+      chunk.append(word, word_index, length);
+      chunk_cells++;
+      word_index += length;
+    }
+    line = std::move(chunk);
+    line_cells = chunk_cells;
+  }
+  if (!line.empty()) lines.push_back(line);
+  if (lines.empty() && !text.empty()) lines.emplace_back(text);
+  return lines;
 }
 
 std::pair<std::string, std::string> first_codepoint(const std::string& text) {
@@ -100,7 +150,8 @@ std::pair<std::string, std::string> first_codepoint(const std::string& text) {
 }
 
 std::vector<std::string> path_completions(const std::string& input,
-                                          const std::string& root) {
+                                          const std::string& root,
+                                          Terminal& terminal) {
   const bool tilde = !input.empty() && input[0] == '~';
   const bool absolute_input = !input.empty() && input[0] == '/';
   const char* home = std::getenv("HOME");
@@ -122,35 +173,23 @@ std::vector<std::string> path_completions(const std::string& input,
                                  ? absolute
                                  : absolute.substr(slash + 1);
 
-  DIR* dir = opendir(directory.empty() ? "/" : directory.c_str());
-  if (!dir) return {};
-  struct Entry {
-    std::string name;
-    bool is_directory;
-  };
-  std::vector<Entry> entries;
-  while (dirent* entry = readdir(dir)) {
-    const std::string name = entry->d_name;
+  std::vector<DirEntry> entries;
+  for (const DirEntry& entry :
+       terminal.list_directory(directory.empty() ? "/" : directory)) {
+    const std::string& name = entry.name;
     if (name.empty() || name[0] == '.') continue;
     if (name.compare(0, prefix.size(), prefix) != 0) continue;
-    bool is_directory = entry->d_type == DT_DIR;
-    if (entry->d_type == DT_UNKNOWN) {
-      struct stat info {};
-      if (stat((directory + name).c_str(), &info) == 0) {
-        is_directory = S_ISDIR(info.st_mode);
-      }
-    }
-    entries.push_back({name, is_directory});
+    entries.push_back(entry);
   }
-  closedir(dir);
 
-  std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+  std::sort(entries.begin(), entries.end(), [](const DirEntry& a,
+                                               const DirEntry& b) {
     if (a.is_directory != b.is_directory) return a.is_directory;
     return a.name < b.name;
   });
 
   std::vector<std::string> result;
-  for (const Entry& entry : entries) {
+  for (const DirEntry& entry : entries) {
     if (result.size() >= MAX_COMPLETIONS) break;
     std::string full = directory + entry.name + (entry.is_directory ? "/" : "");
     std::string shown;
@@ -201,7 +240,7 @@ bool ghost_enabled(const std::string& typed) {
 std::vector<std::string> completions_for(
     const std::string& typed, bool complete,
     const std::vector<std::string>& suggest, const std::string& lib_dir,
-    const std::string& base_dir) {
+    const std::string& base_dir, Terminal& terminal) {
   const std::vector<std::string> known = value_suggestions(typed, suggest);
   if (!known.empty()) return known;
   if (!complete || typed.empty()) return {};
@@ -216,10 +255,10 @@ std::vector<std::string> completions_for(
   };
 
   if (typed.rfind("{file:", 0) == 0) {
-    return wrap("{file:", path_completions(typed.substr(6), base_dir));
+    return wrap("{file:", path_completions(typed.substr(6), base_dir, terminal));
   }
   if (typed.rfind("{lib:", 0) == 0 && !lib_dir.empty()) {
-    return wrap("{lib:", path_completions(typed.substr(5), lib_dir));
+    return wrap("{lib:", path_completions(typed.substr(5), lib_dir, terminal));
   }
   if (typed.rfind("{env:", 0) == 0) {
     const std::string prefix = typed.substr(5);
@@ -233,7 +272,7 @@ std::vector<std::string> completions_for(
     std::sort(result.begin(), result.end());
     return result;
   }
-  return path_completions(typed, base_dir);
+  return path_completions(typed, base_dir, terminal);
 }
 
 struct Window {
@@ -282,21 +321,10 @@ std::string render_input(const std::string& value, std::size_t cursor,
   return out;
 }
 
-std::optional<std::string> choose_editor() {
-  const char* visual = std::getenv("VISUAL");
-  if (visual && *visual) return std::string(visual);
-  const char* editor = std::getenv("EDITOR");
-  if (editor && *editor) return std::string(editor);
-  return std::string("vi");
-}
-
 }  // namespace
 
 struct PromptUI::Impl {
-  int input_fd = -1;
-  int output_fd = -1;
-  struct termios original {};
-  bool raw = false;
+  std::unique_ptr<Terminal> terminal;
   bool closed = false;
   bool tree_mode = false;
   int rows = 0;
@@ -307,67 +335,106 @@ struct PromptUI::Impl {
   std::string pending;
   std::vector<Key> key_queue;
   std::size_t key_position = 0;
+  std::optional<Artwork> artwork;
+  ArtworkLayout artwork_layout;
+  ArtworkProvider artwork_provider;
+  std::vector<std::string> history;
+  bool history_mode = false;
+  std::vector<std::string> last_frame;
+  std::size_t last_columns = 0;
+  int last_terminal_rows = 0;
 
-  Impl(Options options) {
-    input_fd = open("/dev/tty", O_RDONLY | O_CLOEXEC);
-    output_fd = open("/dev/tty", O_WRONLY | O_CLOEXEC);
-    if (input_fd < 0 || output_fd < 0) {
-      if (input_fd >= 0) ::close(input_fd);
-      if (output_fd >= 0) ::close(output_fd);
-      throw std::runtime_error(
-          "no interactive terminal available (" + std::string(std::strerror(errno)) + ")");
-    }
-    if (tcgetattr(input_fd, &original) != 0) {
-      throw std::runtime_error("cannot read the terminal mode");
-    }
-    set_raw(true);
+  Impl(Options options) : terminal(make_terminal()) {
     if (options.lib_dir) lib_dir = *options.lib_dir;
     if (options.base_dir) base_dir = *options.base_dir;
-    else {
-      char buffer[4096];
-      if (getcwd(buffer, sizeof(buffer))) base_dir = buffer;
-    }
+    else base_dir = terminal->current_directory();
     fixed_columns = options.columns;
   }
 
   ~Impl() { close(); }
 
-  void write_all(const std::string& data) {
-    std::size_t offset = 0;
-    while (offset < data.size()) {
-      ssize_t written = ::write(output_fd, data.data() + offset, data.size() - offset);
-      if (written < 0) {
-        if (errno == EINTR) continue;
-        return;
-      }
-      offset += static_cast<std::size_t>(written);
-    }
-  }
+  void write_all(const std::string& data) { terminal->write(data); }
 
-  void set_raw(bool enabled) {
-    if (enabled) {
-      struct termios raw_mode = original;
-      cfmakeraw(&raw_mode);
-      // keep output post-processing off but write explicit "\r\n"
-      tcsetattr(input_fd, TCSAFLUSH, &raw_mode);
-      raw = true;
-    } else {
-      tcsetattr(input_fd, TCSAFLUSH, &original);
-      raw = false;
-    }
-  }
+  void set_raw(bool enabled) { terminal->set_raw(enabled); }
 
-  std::size_t columns() const {
+  std::size_t columns() {
     if (fixed_columns) return static_cast<std::size_t>(std::max(10, *fixed_columns));
-    struct winsize size {};
-    if (ioctl(output_fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
-    return 80;
+    return static_cast<std::size_t>(std::max(10, terminal->columns()));
   }
 
-  int terminal_rows() const {
-    struct winsize size {};
-    if (ioctl(output_fd, TIOCGWINSZ, &size) == 0 && size.ws_row > 0) return size.ws_row;
-    return 24;
+  int terminal_rows() { return std::max(1, terminal->rows()); }
+
+  /// Width of the left column when the right-side image is in use.
+  std::size_t artwork_left_width() {
+    const std::size_t width = columns();
+    if (!artwork || artwork->empty() ||
+        artwork_layout.placement != ArtworkPlacement::Right)
+      return width;
+    std::size_t art_width =
+        static_cast<std::size_t>(std::max(0, artwork->width));
+    for (const std::string& line : artwork->lines)
+      art_width = std::max(art_width, visible_length(line));
+    const std::size_t art_height =
+        std::min(static_cast<std::size_t>(std::max(0, artwork->height)),
+                 artwork->lines.size());
+    const std::size_t gap =
+        static_cast<std::size_t>(std::max(0, artwork_layout.gap));
+    const std::size_t margin =
+        static_cast<std::size_t>(std::max(0, artwork_layout.margin));
+    const std::size_t min_content =
+        static_cast<std::size_t>(std::max(0, artwork_layout.min_content_width));
+    if (static_cast<int>(art_width) < artwork_layout.min_width ||
+        static_cast<int>(art_height) < artwork_layout.min_height ||
+        width < min_content + gap + art_width + margin)
+      return width;
+    return width - art_width - gap - margin;
+  }
+
+  std::size_t text_width() { return artwork_left_width(); }
+
+  /// Width available for notes/descriptions: the left column when the
+  /// right-side image is in use, otherwise the whole terminal.
+  std::size_t note_width() {
+    if (!history_mode) return columns();
+    return text_width();
+  }
+
+  void append_hint(std::vector<std::string>& lines,
+                   const std::optional<std::string>& hint) {
+    if (!hint) return;
+    for (const std::string& wrapped : wrap_text(*hint, text_width()))
+      lines.push_back(dim(wrapped));
+  }
+
+  std::pair<int, int> artwork_target_box() {
+    const int columns_now = static_cast<int>(columns());
+    const int rows_now = terminal_rows();
+    const bool above =
+        artwork_layout.placement == ArtworkPlacement::Above;
+    const int gap =
+        std::max(0, artwork_layout.gap);
+    const int margin =
+        std::max(0, artwork_layout.margin);
+    const int min_content =
+        std::max(0, artwork_layout.min_content_width);
+    int width = above ? columns_now - margin
+                      : columns_now - min_content - gap - margin;
+    int height = above ? rows_now / 2 : rows_now - 1;
+    if (artwork_layout.max_width > 0)
+      width = std::min(width, artwork_layout.max_width);
+    if (artwork_layout.max_height > 0)
+      height = std::min(height, artwork_layout.max_height);
+    return {std::max(1, width), std::max(1, height)};
+  }
+
+  bool refresh_artwork() {
+    if (!artwork_provider) return false;
+    const auto [max_width, max_height] = artwork_target_box();
+    auto refreshed = artwork_provider(max_width, max_height);
+    if (!refreshed) return false;
+    apply_artwork_caption(*refreshed, artwork_layout);
+    artwork = std::move(refreshed);
+    return true;
   }
 
   void clear() {
@@ -376,21 +443,252 @@ struct PromptUI::Impl {
       write_all("\r\x1b[J");
       rows = 0;
     }
+    last_frame.clear();
   }
 
-  void render(const std::vector<std::string>& lines) {
+  void render(const std::vector<std::string>& content,
+              bool pin_last_line = false, bool show_artwork = true,
+              bool use_history = true) {
+    if (!use_history) history.clear();
+    history_mode = false;
+    const std::size_t width = columns();
+    const std::size_t height = static_cast<std::size_t>(terminal_rows());
+    std::size_t art_width =
+        artwork ? static_cast<std::size_t>(std::max(0, artwork->width)) : 0;
+    std::size_t art_height = 0;
+    if (artwork) {
+      for (const std::string& line : artwork->lines)
+        art_width = std::max(art_width, visible_length(line));
+      art_height = std::min(static_cast<std::size_t>(std::max(0, artwork->height)),
+                            artwork->lines.size());
+    }
+    const std::size_t gap =
+        static_cast<std::size_t>(std::max(0, artwork_layout.gap));
+    const std::size_t margin =
+        static_cast<std::size_t>(std::max(0, artwork_layout.margin));
+    const std::size_t min_content =
+        static_cast<std::size_t>(std::max(0, artwork_layout.min_content_width));
+    bool large_enough =
+        show_artwork && artwork && !artwork->empty() &&
+        static_cast<int>(art_width) >= artwork_layout.min_width &&
+        static_cast<int>(art_height) >= artwork_layout.min_height;
+
+    const std::size_t checked_content =
+        (!use_history && pin_last_line && !content.empty())
+            ? content.size() - 1
+            : content.size();
+    std::size_t content_width = 0;
+    if (use_history) {
+      for (const std::string& line : history)
+        content_width = std::max(content_width, visible_length(line));
+    }
+    for (std::size_t index = 0; index < checked_content; index++)
+      content_width = std::max(content_width, visible_length(content[index]));
+
+    std::size_t right_left_width = 0;
+    if (large_enough && artwork_layout.placement == ArtworkPlacement::Right) {
+      const std::size_t image_x = width - art_width - margin;
+      right_left_width = image_x > gap ? image_x - gap : 0;
+    }
+    bool right_cuts_text =
+        large_enough && artwork_layout.placement == ArtworkPlacement::Right &&
+        content_width > right_left_width;
+
+    // If the image would cut text, shrink the image instead of hiding it.
+    // This keeps the artwork visible when a taller terminal reveals wider
+    // rows (or when the image itself grows wider on a height-only resize).
+    if (right_cuts_text && artwork_provider && artwork_layout.placement ==
+                                                     ArtworkPlacement::Right) {
+      const int available_art_width =
+          static_cast<int>(width) - static_cast<int>(gap) -
+          static_cast<int>(margin) - static_cast<int>(content_width);
+      if (available_art_width >= artwork_layout.min_width) {
+        const auto target = artwork_target_box();
+        auto narrowed = artwork_provider(available_art_width, target.second);
+        if (narrowed) {
+          apply_artwork_caption(*narrowed, artwork_layout);
+          artwork = std::move(narrowed);
+          art_width = static_cast<std::size_t>(std::max(0, artwork->width));
+          art_height = std::min(
+              static_cast<std::size_t>(std::max(0, artwork->height)),
+              artwork->lines.size());
+          for (const std::string& line : artwork->lines)
+            art_width = std::max(art_width, visible_length(line));
+          large_enough =
+              static_cast<int>(art_width) >= artwork_layout.min_width &&
+              static_cast<int>(art_height) >= artwork_layout.min_height;
+          if (large_enough) {
+            const std::size_t new_image_x = width - art_width - margin;
+            right_left_width =
+                new_image_x > gap ? new_image_x - gap : 0;
+            right_cuts_text = content_width > right_left_width;
+          }
+        }
+      }
+    }
+
+    auto history_left_lines = [&](std::size_t max_rows) {
+      std::vector<std::string> lines;
+      const std::size_t content_rows = std::min(content.size(), max_rows);
+      const std::size_t history_rows = max_rows - content_rows;
+      const std::size_t history_start =
+          history.size() > history_rows ? history.size() - history_rows : 0;
+      const std::size_t content_start =
+          content.size() > content_rows ? content.size() - content_rows : 0;
+      lines.reserve((history.size() - history_start) +
+                    (content.size() - content_start));
+      lines.insert(lines.end(), history.begin() + history_start,
+                   history.end());
+      lines.insert(lines.end(), content.begin() + content_start,
+                   content.end());
+      return lines;
+    };
+
+    std::vector<std::string> frame_rows;
+    if (large_enough && artwork_layout.placement == ArtworkPlacement::Above &&
+        width >= art_width + margin &&
+        height >= art_height + content.size() + 1) {
+      for (std::size_t index = 0; index < art_height; index++) {
+        std::string row(
+            static_cast<std::size_t>(std::max(0, static_cast<int>(width - art_width - margin))),
+            ' ');
+        row += artwork->lines[index];
+        frame_rows.push_back(std::move(row));
+      }
+      for (const std::string& line : content)
+        frame_rows.push_back(fit_line(line, width));
+    } else if (large_enough && artwork_layout.placement == ArtworkPlacement::Right &&
+               !right_cuts_text &&
+               width >= min_content + gap + art_width + margin &&
+               height >= (use_history ? art_height
+                                      : std::max(content.size(), art_height)) + 1) {
+      const std::size_t image_x = width - art_width - margin;
+      const std::size_t left_width = image_x > gap ? image_x - gap : 0;
+
+      std::vector<std::string> left_lines;
+      bool pin = false;
+      if (use_history) {
+        // Prompts flow in the left column while the image stays fixed; once
+        // the available rows are exhausted the oldest history scrolls off.
+        // The current prompt always keeps as many rows as it needs.
+        history_mode = true;
+        left_lines = history_left_lines(art_height);
+      } else {
+        left_lines = content;
+        pin = pin_last_line && !content.empty() && art_height > content.size();
+      }
+
+      const std::size_t total = std::max(left_lines.size(), art_height);
+      for (std::size_t index = 0; index < total; index++) {
+        std::string row;
+        bool use_line = false;
+        std::size_t line_index = 0;
+        if (pin) {
+          // Keep the header/tree rows at the top and pin the last line (the
+          // footer) to the bottom of the image block.
+          if (index + 1 < left_lines.size()) {
+            line_index = index;
+            use_line = true;
+          } else if (index + 1 == art_height) {
+            line_index = left_lines.size() - 1;
+            use_line = true;
+          }
+        } else if (index < left_lines.size()) {
+          line_index = index;
+          use_line = true;
+        }
+        if (use_line) row = fit_line(left_lines[line_index], left_width);
+        const std::size_t filled = visible_length(row);
+        if (filled < image_x) row.append(image_x - filled, ' ');
+        if (index < art_height) row += artwork->lines[index];
+        frame_rows.push_back(std::move(row));
+      }
+    } else if (use_history && artwork && !artwork->empty() &&
+               artwork_layout.placement == ArtworkPlacement::Right) {
+      // The image would cut UI text: keep the prompt flow, but use the full
+      // terminal width and omit the image for this frame.
+      history_mode = true;
+      const std::size_t visible_height = std::max<std::size_t>(
+          1, art_height > 0 ? art_height : (height > 1 ? height - 1 : 1));
+      const std::vector<std::string> left_lines =
+          history_left_lines(visible_height);
+      frame_rows.reserve(visible_height);
+      for (std::size_t index = 0; index < visible_height; index++) {
+        frame_rows.push_back(fit_line(
+            index < left_lines.size() ? left_lines[index] : std::string(),
+            width));
+      }
+    }
+
+    if (frame_rows.empty()) {
+      frame_rows.reserve(content.size());
+      for (const std::string& line : content)
+        frame_rows.push_back(fit_line(line, width));
+    }
+
+    const bool resized =
+        !last_frame.empty() &&
+        (width != last_columns || height != static_cast<std::size_t>(last_terminal_rows));
+    const bool can_diff =
+        !resized && !last_frame.empty() && last_frame.size() == frame_rows.size();
+
+    if (can_diff) {
+      bool changed = false;
+      for (std::size_t index = 0; index < frame_rows.size(); index++) {
+        if (frame_rows[index] != last_frame[index]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return;
+
+      std::string out = SYNC_START;
+      if (rows > 1) out += "\x1b[" + std::to_string(rows - 1) + "A";
+      out += "\r";
+      for (std::size_t index = 0; index < frame_rows.size(); index++) {
+        if (frame_rows[index] != last_frame[index]) {
+          // Only clear the tail when the new row is shorter; otherwise the
+          // write itself covers the previous content.
+          if (visible_length(frame_rows[index]) <
+              visible_length(last_frame[index])) {
+            out += "\x1b[K";
+          }
+          out += frame_rows[index];
+        }
+        if (index + 1 < frame_rows.size()) out += "\r\n";
+      }
+      out += SYNC_END;
+      write_all(out);
+      last_frame = std::move(frame_rows);
+      return;
+    }
+
+    write_all(SYNC_START);
     clear();
     std::string frame = HIDE_CURSOR;
-    const std::size_t width = columns();
-    for (std::size_t index = 0; index < lines.size(); index++) {
+    for (std::size_t index = 0; index < frame_rows.size(); index++) {
       if (index > 0) frame += "\r\n";
-      frame += fit_line(lines[index], width);
+      frame += frame_rows[index];
     }
+    frame += SYNC_END;
     write_all(frame);
-    rows = static_cast<int>(lines.size());
+    last_frame = std::move(frame_rows);
+    rows = static_cast<int>(last_frame.size());
+    last_columns = width;
+    last_terminal_rows = static_cast<int>(height);
   }
 
   void commit(const std::string& line) {
+    if (history_mode) {
+      history.push_back(line);
+      constexpr std::size_t kMaxHistory = 2048;
+      if (history.size() > kMaxHistory) {
+        history.erase(history.begin(),
+                      history.begin() +
+                          static_cast<std::ptrdiff_t>(history.size() - kMaxHistory));
+      }
+      return;
+    }
     clear();
     write_all(fit_line(line, columns()) + "\r\n");
   }
@@ -400,11 +698,7 @@ struct PromptUI::Impl {
     closed = true;
     clear();
     write_all(SHOW_CURSOR);
-    set_raw(false);
-    if (input_fd >= 0) ::close(input_fd);
-    if (output_fd >= 0) ::close(output_fd);
-    input_fd = -1;
-    output_fd = -1;
+    terminal->close();
   }
 
   void parse_input(const std::string& chunk, std::vector<Key>& keys,
@@ -573,10 +867,17 @@ struct PromptUI::Impl {
           continue;
         }
       }
-      struct pollfd descriptor{input_fd, POLLIN, 0};
       const int timeout = pending.empty() ? -1 : ESCAPE_TIMEOUT_MS;
-      const int ready = poll(&descriptor, 1, timeout);
-      if (ready == 0) {
+      const TerminalEvent event = terminal->wait_event(timeout);
+      if (event == TerminalEvent::Resize) {
+        // Re-render the artwork before the prompt loop builds its lines, so
+        // descriptions wrap to the new left-column width immediately.
+        refresh_artwork();
+        Key resize;
+        resize.name = "resize";
+        return resize;
+      }
+      if (event == TerminalEvent::Timeout) {
         // incomplete escape sequence: treat it as esc + the rest as text
         const std::string current = pending;
         pending.clear();
@@ -593,12 +894,8 @@ struct PromptUI::Impl {
         }
         continue;
       }
-      if (ready < 0) {
-        if (errno == EINTR) continue;
-        throw PromptCancelled();
-      }
       char buffer[4096];
-      const ssize_t count = read(input_fd, buffer, sizeof(buffer));
+      const int count = terminal->read(buffer, sizeof(buffer));
       if (count <= 0) throw PromptCancelled();
       pending.append(buffer, static_cast<std::size_t>(count));
     }
@@ -636,7 +933,7 @@ Reply<std::string> PromptUI::Impl::text(const TextPrompt& prompt) {
 
   auto completions = [&]() {
     return completions_for(state.typed, prompt.complete, prompt.suggest,
-                           lib_dir, base_dir);
+                           lib_dir, base_dir, *terminal);
   };
   auto materialize = [&](const std::vector<std::string>& matches) {
     if (state.pick < 0) return;
@@ -665,7 +962,7 @@ Reply<std::string> PromptUI::Impl::text(const TextPrompt& prompt) {
       placeholder = prompt.default_value;
     }
     std::vector<std::string> lines;
-    if (prompt.hint) lines.push_back(dim(*prompt.hint));
+    append_hint(lines, prompt.hint);
     lines.push_back(cyan(prompt.message) + " " + dim(">") + " " +
                     render_input(value, cursor, ghost, placeholder));
     if (error) lines.push_back(red(*error));
@@ -831,7 +1128,7 @@ Reply<int> PromptUI::Impl::select(const SelectPrompt& prompt) {
                            ? -1
                            : indices[std::min<int>(state.index, indices.size() - 1)];
     std::vector<std::string> lines;
-    if (prompt.hint) lines.push_back(dim(*prompt.hint));
+    append_hint(lines, prompt.hint);
     std::string header = cyan(prompt.message) + " " + dim(">");
     if (!state.filter.empty()) {
       header += " " + state.filter + " " +
@@ -853,9 +1150,7 @@ Reply<int> PromptUI::Impl::select(const SelectPrompt& prompt) {
       }
     }
     if (labels.empty()) lines.push_back(dim("no match"));
-    if (active >= 0 && prompt.options[active].hint) {
-      lines.push_back(dim(*prompt.options[active].hint));
-    }
+    if (active >= 0) append_hint(lines, prompt.options[active].hint);
     if (error) lines.push_back(red(*error));
     render(lines);
 
@@ -934,7 +1229,7 @@ Reply<std::vector<int>> PromptUI::Impl::multiselect(
                            ? -1
                            : indices[std::min<int>(state.index, indices.size() - 1)];
     std::vector<std::string> lines;
-    if (prompt.hint) lines.push_back(dim(*prompt.hint));
+    append_hint(lines, prompt.hint);
     lines.push_back(cyan(prompt.message) + " " + dim(">") +
                     (state.filter.empty() ? "" : " " + state.filter));
     std::vector<std::string> labels;
@@ -956,9 +1251,7 @@ Reply<std::vector<int>> PromptUI::Impl::multiselect(
       }
     }
     if (labels.empty()) lines.push_back(dim("no match"));
-    if (active >= 0 && prompt.options[active].hint) {
-      lines.push_back(dim(*prompt.options[active].hint));
-    }
+    if (active >= 0) append_hint(lines, prompt.options[active].hint);
     if (error) lines.push_back(red(*error));
     render(lines);
 
@@ -1023,7 +1316,7 @@ Reply<bool> PromptUI::Impl::confirm(const ConfirmPrompt& prompt) {
   std::string typed;
   for (;;) {
     std::vector<std::string> lines;
-    if (prompt.hint) lines.push_back(dim(*prompt.hint));
+    append_hint(lines, prompt.hint);
     lines.push_back(cyan(prompt.message) + " " + typed + REVERSE + " " + RESET + " " +
                     dim(initial ? "[Y/n]" : "[y/N]"));
     render(lines);
@@ -1065,10 +1358,10 @@ Reply<std::string> PromptUI::Impl::editor(const TextPrompt& prompt) {
   const std::size_t line_count =
       initial.empty() ? 0 : 1 + static_cast<std::size_t>(
                                      std::count(initial.begin(), initial.end(), '\n'));
-  const std::string editor_command = choose_editor().value_or("vi");
+  const std::string editor_command = terminal->editor_name();
   for (;;) {
     std::vector<std::string> lines;
-    if (prompt.hint) lines.push_back(dim(*prompt.hint));
+    append_hint(lines, prompt.hint);
     std::string status = initial.empty()
                              ? "empty"
                              : std::to_string(line_count) + " line" +
@@ -1085,35 +1378,17 @@ Reply<std::string> PromptUI::Impl::editor(const TextPrompt& prompt) {
     }
     if (key.name != "return") continue;
 
-    char directory[] = "/tmp/cform-edit-XXXXXX";
-    if (!mkdtemp(directory)) throw std::runtime_error("cannot create a temp dir");
-    const std::string file = std::string(directory) + "/value.txt";
-    {
-      FILE* handle = std::fopen(file.c_str(), "wb");
-      if (handle) {
-        std::fwrite(initial.data(), 1, initial.size(), handle);
-        std::fclose(handle);
-      }
-    }
     set_raw(false);
     write_all(SHOW_CURSOR);
-    std::system((editor_command + " \"" + file + "\"").c_str());
+    std::string value;
+    if (!terminal->edit(initial, value)) {
+      set_raw(true);
+      write_all(HIDE_CURSOR);
+      throw std::runtime_error("no external editor available");
+    }
     set_raw(true);
     write_all(HIDE_CURSOR);
-    std::string value;
-    {
-      FILE* handle = std::fopen(file.c_str(), "rb");
-      if (handle) {
-        char buffer[4096];
-        std::size_t count;
-        while ((count = std::fread(buffer, 1, sizeof(buffer), handle)) > 0) {
-          value.append(buffer, count);
-        }
-        std::fclose(handle);
-      }
-    }
     if (!value.empty() && value.back() == '\n') value.pop_back();
-    std::filesystem::remove_all(directory);
 
     std::vector<std::string> value_lines;
     std::string current;
@@ -1169,11 +1444,13 @@ void PromptUI::note(const std::string& message,
   std::string line;
   if (title) line = *title + ": ";
   line += body;
-  impl_->commit(dim(line));
+  for (const std::string& wrapped : wrap_text(line, impl_->note_width()))
+    impl_->commit(dim(wrapped));
 }
 
 void PromptUI::error(const std::string& message) {
-  impl_->commit(red(message));
+  for (const std::string& wrapped : wrap_text(message, impl_->note_width()))
+    impl_->commit(red(wrapped));
 }
 
 void PromptUI::banner(const std::string& title) {
@@ -1183,18 +1460,35 @@ void PromptUI::banner(const std::string& title) {
   impl_->write_all(cyan(title) + "\r\n" + dim(legend) + "\r\n");
 }
 
-void PromptUI::outro(const std::string& message) { impl_->commit(message); }
+void PromptUI::outro(const std::string& message) {
+  impl_->history_mode = false;
+  impl_->commit(message);
+}
 
 void PromptUI::cancel(const std::string& message) {
+  impl_->history_mode = false;
   impl_->commit(red("x " + message));
+}
+
+void PromptUI::begin_prompts() {
+  impl_->history.clear();
+  impl_->history_mode =
+      impl_->artwork && !impl_->artwork->empty() &&
+      impl_->artwork_layout.placement == ArtworkPlacement::Right;
+}
+
+void PromptUI::end_prompts() {
+  impl_->history_mode = false;
+  impl_->history.clear();
 }
 
 void PromptUI::close() { impl_->close(); }
 
 Key PromptUI::read_key() { return impl_->next_key(); }
 
-void PromptUI::render_lines(const std::vector<std::string>& lines) {
-  impl_->render(lines);
+void PromptUI::render_lines(const std::vector<std::string>& lines,
+                            bool pin_last_line, bool show_artwork) {
+  impl_->render(lines, pin_last_line, show_artwork, false);
 }
 
 void PromptUI::clear_lines() { impl_->clear(); }
@@ -1206,5 +1500,20 @@ int PromptUI::terminal_columns() const {
 }
 
 void PromptUI::set_tree_mode(bool enabled) { impl_->tree_mode = enabled; }
+
+void PromptUI::set_artwork(std::optional<Artwork> artwork,
+                          ArtworkLayout layout) {
+  if (artwork) apply_artwork_caption(*artwork, layout);
+  impl_->artwork = std::move(artwork);
+  impl_->artwork_layout = layout;
+}
+
+void PromptUI::set_artwork_provider(ArtworkProvider provider,
+                                   ArtworkLayout layout) {
+  impl_->artwork_provider = std::move(provider);
+  impl_->artwork_layout = layout;
+}
+
+bool PromptUI::refresh_artwork() { return impl_->refresh_artwork(); }
 
 }  // namespace cform

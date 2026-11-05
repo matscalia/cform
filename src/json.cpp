@@ -3,7 +3,12 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+
+#ifdef CFORM_USE_SIMDJSON
 #include <simdjson.h>
+#else
+#include "json_parse.hpp"
+#endif
 
 namespace cform {
 
@@ -80,6 +85,7 @@ const Json* Json::at(std::size_t index) const {
   return index < array.size() ? &array[index] : nullptr;
 }
 
+#ifdef CFORM_USE_SIMDJSON
 namespace {
 
 Json from_simdjson(const simdjson::dom::element& element) {
@@ -160,6 +166,14 @@ std::optional<Json> Json::parse(std::string_view text, std::string& error) {
   }
   return from_simdjson(result.value());
 }
+
+#else
+
+std::optional<Json> Json::parse(std::string_view text, std::string& error) {
+  return parse_json_fallback(text, error);
+}
+
+#endif
 
 std::string json_escape(std::string_view text) {
   std::string out;

@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "artwork.hpp"
+
 namespace cform {
 
 struct Option {
@@ -118,12 +120,31 @@ class PromptUI : public Prompter {
 
   // --- primitives for custom screens (the tree view) ------------------------
   Key read_key();
-  void render_lines(const std::vector<std::string>& lines);
+  void render_lines(const std::vector<std::string>& lines,
+                    bool pin_last_line = false,
+                    bool show_artwork = true);
   void clear_lines();
   int terminal_rows() const;
   int terminal_columns() const;
   /// when enabled, ctrl+f aborts a prompt with `TreeJump`
   void set_tree_mode(bool enabled);
+
+  /// right-aligned artwork drawn next to/under the frame when it fits.
+  void set_artwork(std::optional<Artwork> artwork,
+                   ArtworkLayout layout = ArtworkLayout{});
+
+  /// Provider used to (re)render the artwork when the terminal is resized.
+  using ArtworkProvider =
+      std::function<std::optional<Artwork>(int max_width, int max_height)>;
+  void set_artwork_provider(ArtworkProvider provider,
+                            ArtworkLayout layout = ArtworkLayout{});
+  /// Renders the artwork with the provider at the current terminal size.
+  bool refresh_artwork();
+
+  /// Start/stop a wizard prompt session. While active, prompt history flows
+  /// next to a right-side image and scrolls within that column.
+  void begin_prompts();
+  void end_prompts();
 
  private:
   struct Impl;
