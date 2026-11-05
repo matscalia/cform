@@ -145,6 +145,10 @@ class PromptUI : public Prompter {
   /// next to a right-side image and scrolls within that column.
   void begin_prompts();
   void end_prompts();
+  bool can_resume_prompt() const;
+  /// Re-run the last prompt session from its recorded key logs. Returns false
+  /// when there is no prompt to resume.
+  bool begin_prompt_replay();
 
  private:
   struct Impl;

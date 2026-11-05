@@ -24,6 +24,7 @@ struct RunOptions {
   std::string libDir;
   std::string baseDir;
   int columns = 0;
+  bool promptRoot = false;
   // Pre-rendered ANSI artwork (chafa-wasm renders it in the Node wrapper).
   std::string artAnsi;
   int artWidth = 0;
@@ -162,7 +163,8 @@ RunResult run(const std::string& schema_text, const std::string& document_text,
     cform::Walker walker(*schema, *prompt_ui);
     cform::Json value = document ? *document : empty_document(*schema);
     cform::run_tree(*prompt_ui, *schema, value, walker,
-                    document ? "document" : "<new document>");
+                    document ? "document" : "<new document>",
+                    options.promptRoot);
     prompt_ui->close();
     result.ok = true;
     result.value = value.to_pretty(2);
@@ -185,6 +187,7 @@ EMSCRIPTEN_BINDINGS(cform_wasm) {
       .field("libDir", &RunOptions::libDir)
       .field("baseDir", &RunOptions::baseDir)
       .field("columns", &RunOptions::columns)
+      .field("promptRoot", &RunOptions::promptRoot)
       .field("artAnsi", &RunOptions::artAnsi)
       .field("artWidth", &RunOptions::artWidth)
       .field("artMinWidth", &RunOptions::artMinWidth)

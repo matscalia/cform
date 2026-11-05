@@ -42,7 +42,10 @@ std::vector<TreeRow> build_tree_rows(const Json& document, const Json& root_sche
                                      const std::set<std::string>& expanded);
 
 /// Runs the tree screen until the user quits; edits `document` in place.
+/// When `prompt_root_first` is true, the root wizard is shown before the tree;
+/// ctrl+f returns to the tree at any point.
 void run_tree(PromptUI& ui, const Json& root_schema, Json& document,
-              Walker& walker, const std::string& document_label);
+              Walker& walker, const std::string& document_label,
+              bool prompt_root_first = false);
 
 }  // namespace cform

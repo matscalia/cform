@@ -58,6 +58,8 @@ const { loadCform } = require('./wasm');
 const cform = await loadCform();   // no TTY needed yet
 const value = cform.run(schema);   // blocking; draws the UI, returns JSON
 const edited = cform.run(schema, document);  // with an existing document
+const direct = cform.run(schema, null, { promptRoot: true }); // start at the root
+// ctrl+f returns to the tree; q in the tree prints the result
 ```
 
 `run` returns the parsed value and throws on cancel/error. Use
@@ -152,6 +154,7 @@ usage: cform [options] [document]
                     complete are marked with a tick and kept unless selected
   --lib-dir <dir>   root used to complete `{lib:...}` references
   --base-dir <dir>  directory used for relative path completion
+  --prompt          start by prompting the root; ctrl+f returns to the tree
   --image <file>    right-aligned image, when the terminal has room (chafa)
   --image-min-width <n>, --image-min-height <n>
                     hide below this rendered cell size (default 8x4)
@@ -230,6 +233,11 @@ fields /path/to/doc.json
   reports each finalized value), so the tree shows them right away and
   re-entering the node uses them as the prefilled/default values; only the
   prompt that was still open is dropped.
+- **`ctrl+o`** in the tree reopens the last prompt at the exact point you left
+  it: typed text, cursor position, selections, completion state and validation
+  state are restored. It also works after arriving in the tree via `ctrl+f`,
+  after the `--prompt` initial root wizard, and after a completed prompt series
+  (the last prompt is reopened just before its accepting key).
 - `q` (or `esc`) finishes and prints the document; `ctrl-c` aborts. Fields you
   do not edit are preserved byte-for-byte, including keys the schema does not
   know and hand-written pipe-combined `patternProperties` keys.

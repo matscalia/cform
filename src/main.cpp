@@ -37,6 +37,8 @@ void usage(std::ostream& out) {
          "                    `enter` fills a node and `ctrl+f` returns to it\n"
          "  --lib-dir <dir>   root used to complete `{lib:...}` references\n"
          "  --base-dir <dir>  directory used for relative path completion\n"
+         "  --prompt          start by prompting the root instead of the tree;\n"
+         "                    ctrl+f returns to the tree\n"
          "  --image <file>    show an image on the right when it fits (chafa)\n"
          "  --image-min-width <n>, --image-min-height <n>\n"
          "                    hide the image below this cell size (default 8x4)\n"
@@ -161,6 +163,7 @@ int main(int argc, char** argv) {
   int image_max_width = 0;
   int image_max_height = 0;
   bool image_above = false;
+  bool prompt_only = false;
   std::string image_caption;
   float image_caption_position = 1.0f;
   std::string image_caption_align = "center";
@@ -243,6 +246,10 @@ int main(int argc, char** argv) {
           return 2;
         }
       }
+      continue;
+    }
+    if (argument == "--prompt") {
+      prompt_only = true;
       continue;
     }
     if (argument == "--image-caption-bold") {
@@ -361,7 +368,8 @@ int main(int argc, char** argv) {
     cform::Json value =
         document ? *document : empty_document(*parsed);
     cform::run_tree(*prompt_ui, *parsed, value, walker,
-                    document_path.empty() ? "<new document>" : document_path);
+                    document_path.empty() ? "<new document>" : document_path,
+                    prompt_only);
     prompt_ui->close();
     std::cout << value.to_pretty(2) << "\n";
     return 0;

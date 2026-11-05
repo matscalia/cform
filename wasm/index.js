@@ -456,6 +456,12 @@ async function loadCform(options = {}) {
         libDir: runOptions.libDir ?? options.libDir ?? '',
         baseDir: runOptions.baseDir ?? options.baseDir ?? '',
         columns: runOptions.columns ?? options.columns ?? 0,
+        promptRoot: !!(
+          runOptions.promptRoot ??
+          runOptions.promptOnly ??
+          options.promptRoot ??
+          options.promptOnly
+        ),
         artAnsi: artwork ? artwork.ansi : '',
         artWidth: artwork ? artwork.width : 0,
         artMinWidth: runOptions.imageMinWidth ?? options.imageMinWidth ?? 8,

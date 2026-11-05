@@ -359,7 +359,8 @@ std::vector<TreeRow> build_tree_rows(const Json &document,
 }
 
 void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
-              Walker &walker, const std::string &document_label) {
+              Walker &walker, const std::string &document_label,
+              bool prompt_root_first) {
 
   walker.set_progress([&document](const Path &path, const Json &value) {
     if (path.segments.empty())
@@ -367,11 +368,67 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
     set_at_path(document, path, value);
   });
 
+  struct LastPrompt {
+    Json schema;
+    Path path;
+    ValueOptions options;
+    bool expandable = false;
+  };
+
   std::set<std::string> expanded;
-  std::vector<TreeRow> rows = build_tree_rows(document, root_schema, expanded);
+  std::vector<TreeRow> rows;
   int cursor = 0;
   int scroll = 0;
   std::optional<Path> restore_to;
+  std::optional<LastPrompt> last_prompt;
+
+  auto apply_outcome = [&](const Outcome &outcome, const Path &path,
+                           bool expandable) {
+    if (outcome.kind == Outcome::Kind::Value) {
+      if (path.segments.empty())
+        document = outcome.value;
+      else
+        set_at_path(document, path, outcome.value);
+      if (expandable)
+        expanded.insert(path_label(path));
+    } else if (outcome.kind == Outcome::Kind::Skip) {
+      if (!path.segments.empty())
+        erase_at_path(document, path);
+    }
+  };
+
+  auto run_walker = [&](const Json &schema, const Path &path,
+                        const ValueOptions &options, bool replay,
+                        bool expandable) {
+    if (!replay) ui.begin_prompts();
+    try {
+      const Outcome outcome = walker.value(schema, path, options);
+      apply_outcome(outcome, path, expandable);
+    } catch (const TreeJump &) {
+      // ctrl+f: keep the previous value and go back to the tree
+    }
+    ui.end_prompts();
+  };
+
+  auto open_row = [&](const TreeRow &row) {
+    restore_to = row.path;
+    std::optional<Json> prefill;
+    if (row.present)
+      prefill = row.value;
+    const ValueOptions options{prefill, false, row.required,
+                               prefill.has_value()};
+    last_prompt = LastPrompt{row.schema, row.path, options, row.expandable};
+    run_walker(row.schema, row.path, options, false, row.expandable);
+  };
+
+  if (prompt_root_first) {
+    const ValueOptions options{std::optional<Json>(document), false, false, true};
+    last_prompt = LastPrompt{root_schema, Path{}, options, false};
+    restore_to = Path{};
+    run_walker(root_schema, Path{}, options, false, false);
+  }
+
+  rows = build_tree_rows(document, root_schema, expanded);
 
   for (;;) {
     rows = build_tree_rows(document, root_schema, expanded);
@@ -404,7 +461,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       lines.push_back(render_row(rows[index], index == cursor));
     }
     lines.push_back(footer(
-        " ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+f:tree  q:done ",
+        " ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+o:prompt  ctrl+f:tree  q:done ",
         std::to_string(cursor + 1) + "/" + std::to_string(rows.size()), width));
     ui.render_lines(lines, true, true);
 
@@ -460,33 +517,17 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       }
       continue;
     }
+    if (key.ctrl && key.name == "o") {
+      if (last_prompt && ui.begin_prompt_replay()) {
+        restore_to = last_prompt->path;
+        run_walker(last_prompt->schema, last_prompt->path,
+                   last_prompt->options, true, last_prompt->expandable);
+      }
+      continue;
+    }
     if (key.name == "return" || key.name == "space" ||
         (key.has_str && key.str == " ")) {
-      const TreeRow row = rows[cursor];
-      restore_to = row.path;
-      std::optional<Json> prefill;
-      if (row.present)
-        prefill = row.value;
-      ui.begin_prompts();
-      try {
-        const Outcome outcome =
-            walker.value(row.schema, row.path,
-                         {prefill, false, row.required, prefill.has_value()});
-        if (outcome.kind == Outcome::Kind::Value) {
-          if (row.path.segments.empty())
-            document = outcome.value;
-          else
-            set_at_path(document, row.path, outcome.value);
-          if (row.expandable)
-            expanded.insert(path_label(row.path));
-        } else if (outcome.kind == Outcome::Kind::Skip) {
-          if (!row.path.segments.empty())
-            erase_at_path(document, row.path);
-        }
-      } catch (const TreeJump &) {
-        // ctrl+f: keep the previous value and go back to the tree
-      }
-      ui.end_prompts();
+      open_row(rows[cursor]);
       continue;
     }
   }

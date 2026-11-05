@@ -344,6 +344,20 @@ struct PromptUI::Impl {
   std::size_t last_columns = 0;
   int last_terminal_rows = 0;
 
+  // Prompt key recording: ctrl+o replays the keys of the previous prompts to
+  // restore the exact same prompt (including typed text and selections).
+  std::vector<Key> prompt_keys;
+  bool recording_keys = false;
+  std::vector<std::vector<Key>> session_keys;
+  std::optional<std::size_t> interrupted_prompt;
+  bool replay_active = false;
+  std::size_t replay_next = 0;
+  std::size_t replay_target = 0;
+  std::vector<Key> replay_prefix;
+  bool replay_skip_record = false;
+  std::vector<Key> key_replay;
+  std::size_t key_replay_pos = 0;
+
   Impl(Options options) : terminal(make_terminal()) {
     if (options.lib_dir) lib_dir = *options.lib_dir;
     if (options.base_dir) base_dir = *options.base_dir;
@@ -803,6 +817,10 @@ struct PromptUI::Impl {
           event.name = "f";
           event.ctrl = true;
           break;
+        case '\x0f':
+          event.name = "o";
+          event.ctrl = true;
+          break;
         case '\x04':
           event.name = "d";
           event.ctrl = true;
@@ -853,9 +871,99 @@ struct PromptUI::Impl {
     }
   }
 
+  void log_key(const Key& key) {
+    if (!recording_keys) return;
+    if (tree_mode && key.ctrl && key.name == "f") return;
+    prompt_keys.push_back(key);
+  }
+
+  void begin_prompt_call() {
+    if (replay_active) {
+      if (replay_next < replay_target) {
+        key_replay = session_keys[replay_next++];
+        key_replay_pos = 0;
+        replay_skip_record = true;
+        recording_keys = false;
+        return;
+      }
+      if (replay_next == replay_target) {
+        key_replay = replay_prefix;
+        key_replay_pos = 0;
+        session_keys.resize(replay_target);
+        replay_active = false;
+        replay_skip_record = false;
+        prompt_keys.clear();
+        recording_keys = true;
+        replay_next++;
+        return;
+      }
+    }
+    prompt_keys.clear();
+    recording_keys = true;
+    replay_skip_record = false;
+  }
+
+  void end_prompt_call(bool completed) {
+    if (replay_skip_record) {
+      replay_skip_record = false;
+      recording_keys = false;
+      return;
+    }
+    if (!recording_keys) return;
+    recording_keys = false;
+    session_keys.push_back(std::move(prompt_keys));
+    prompt_keys.clear();
+    if (!completed)
+      interrupted_prompt = session_keys.size() - 1;
+    else
+      interrupted_prompt.reset();
+  }
+
+  bool begin_prompt_replay() {
+    if (session_keys.empty()) return false;
+    std::size_t target = 0;
+    replay_prefix.clear();
+    if (interrupted_prompt) {
+      target = *interrupted_prompt;
+      replay_prefix = session_keys[target];
+    } else {
+      target = session_keys.size() - 1;
+      // Reopen the last prompt just before its accepting key, so its text or
+      // selection is restored and the user can change it.
+      replay_prefix = session_keys[target];
+      if (!replay_prefix.empty()) replay_prefix.pop_back();
+    }
+    if (target >= session_keys.size()) target = session_keys.size() - 1;
+    replay_active = true;
+    replay_next = 0;
+    replay_target = target;
+    replay_skip_record = false;
+    key_replay.clear();
+    key_replay_pos = 0;
+    prompt_keys.clear();
+    recording_keys = false;
+    key_queue.clear();
+    pending.clear();
+    key_position = 0;
+    history.clear();
+    history_mode =
+        artwork && !artwork->empty() &&
+        artwork_layout.placement == ArtworkPlacement::Right;
+    return true;
+  }
+
   Key next_key() {
+    if (key_replay_pos < key_replay.size()) {
+      Key key = key_replay[key_replay_pos++];
+      log_key(key);
+      return key;
+    }
     for (;;) {
-      if (key_position < key_queue.size()) return key_queue[key_position++];
+      if (key_position < key_queue.size()) {
+        Key key = key_queue[key_position++];
+        log_key(key);
+        return key;
+      }
       if (!pending.empty()) {
         std::vector<Key> parsed;
         std::string rest;
@@ -1422,19 +1530,51 @@ PromptUI::~PromptUI() {
 }
 
 Reply<std::string> PromptUI::text(const TextPrompt& prompt) {
-  return impl_->text(prompt);
+  impl_->begin_prompt_call();
+  try {
+    Reply<std::string> reply = impl_->text(prompt);
+    impl_->end_prompt_call(true);
+    return reply;
+  } catch (const TreeJump&) {
+    impl_->end_prompt_call(false);
+    throw;
+  }
 }
 
 Reply<int> PromptUI::select(const SelectPrompt& prompt) {
-  return impl_->select(prompt);
+  impl_->begin_prompt_call();
+  try {
+    Reply<int> reply = impl_->select(prompt);
+    impl_->end_prompt_call(true);
+    return reply;
+  } catch (const TreeJump&) {
+    impl_->end_prompt_call(false);
+    throw;
+  }
 }
 
 Reply<std::vector<int>> PromptUI::multiselect(const MultiSelectPrompt& prompt) {
-  return impl_->multiselect(prompt);
+  impl_->begin_prompt_call();
+  try {
+    Reply<std::vector<int>> reply = impl_->multiselect(prompt);
+    impl_->end_prompt_call(true);
+    return reply;
+  } catch (const TreeJump&) {
+    impl_->end_prompt_call(false);
+    throw;
+  }
 }
 
 Reply<bool> PromptUI::confirm(const ConfirmPrompt& prompt) {
-  return impl_->confirm(prompt);
+  impl_->begin_prompt_call();
+  try {
+    Reply<bool> reply = impl_->confirm(prompt);
+    impl_->end_prompt_call(true);
+    return reply;
+  } catch (const TreeJump&) {
+    impl_->end_prompt_call(false);
+    throw;
+  }
 }
 
 void PromptUI::note(const std::string& message,
@@ -1471,6 +1611,14 @@ void PromptUI::cancel(const std::string& message) {
 }
 
 void PromptUI::begin_prompts() {
+  impl_->session_keys.clear();
+  impl_->interrupted_prompt.reset();
+  impl_->replay_active = false;
+  impl_->replay_skip_record = false;
+  impl_->key_replay.clear();
+  impl_->key_replay_pos = 0;
+  impl_->prompt_keys.clear();
+  impl_->recording_keys = false;
   impl_->history.clear();
   impl_->history_mode =
       impl_->artwork && !impl_->artwork->empty() &&
@@ -1480,7 +1628,16 @@ void PromptUI::begin_prompts() {
 void PromptUI::end_prompts() {
   impl_->history_mode = false;
   impl_->history.clear();
+  impl_->recording_keys = false;
+  impl_->replay_active = false;
+  impl_->replay_skip_record = false;
+  impl_->key_replay.clear();
+  impl_->key_replay_pos = 0;
 }
+
+bool PromptUI::can_resume_prompt() const { return !impl_->session_keys.empty(); }
+
+bool PromptUI::begin_prompt_replay() { return impl_->begin_prompt_replay(); }
 
 void PromptUI::close() { impl_->close(); }
 

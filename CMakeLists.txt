@@ -92,4 +92,12 @@ else()
               $<TARGET_FILE:cform>
     )
   endif()
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME resume
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/test/resume_test.py
+              $<TARGET_FILE:cform>
+    )
+  endif()
 endif()

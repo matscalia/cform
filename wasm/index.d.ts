@@ -15,6 +15,10 @@ export interface CformOptions {
   libDir?: string;
   /** Directory used for relative path completion. Defaults to `process.cwd()`. */
   baseDir?: string;
+  /** Start by prompting the root; ctrl+f returns to the tree. */
+  promptRoot?: boolean;
+  /** @deprecated use `promptRoot`. */
+  promptOnly?: boolean;
   /** Image shown on the right when it fits. Requires `chafa-wasm`. */
   image?: string;
   /** Rendered image size in terminal cells (defaults to the full TUI height,
@@ -56,6 +60,9 @@ export interface RunOptions {
   libDir?: string;
   baseDir?: string;
   columns?: number;
+  promptRoot?: boolean;
+  /** @deprecated use `promptRoot`. */
+  promptOnly?: boolean;
   imageMinWidth?: number;
   imageMinHeight?: number;
   imageMinContentWidth?: number;
