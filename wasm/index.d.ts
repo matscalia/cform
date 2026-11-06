@@ -29,8 +29,9 @@ export interface CformOptions {
   baseDir?: string;
   /** Start by prompting the root; ctrl+f returns to the tree. */
   promptRoot?: boolean;
-  /** Image shown on the right when it fits. Requires `chafa-wasm`. */
-  image?: string;
+  /** Image shown on the right when it fits. A filesystem path or the already
+   * decoded image bytes (PNG/JPEG/WebP). Requires `chafa-wasm`. */
+  image?: string | Uint8Array | ArrayBuffer;
   /** Rendered image size in terminal cells (defaults to the full TUI height,
    * preserving the source aspect ratio). */
   imageWidth?: number;
@@ -120,9 +121,10 @@ export interface Cform {
     options?: RunOptions,
   ): RunResult;
 
-  /** Renders an image with chafa-wasm for subsequent `run` calls. */
+  /** Renders an image with chafa-wasm for subsequent `run` calls. Accepts a
+   * filesystem path or the already decoded image bytes (PNG/JPEG/WebP). */
   prepareImage(
-    file: string | null,
+    image: string | Uint8Array | ArrayBuffer | null,
     options?: CformOptions,
   ): Promise<{ width: number; height: number } | null>;
 

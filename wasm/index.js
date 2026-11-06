@@ -172,7 +172,20 @@ function renderAnsiSync(image, options, maxWidth, maxHeight) {
   };
 }
 
-async function renderImage(file, options) {
+// Reads the image source: a filesystem path or already-decoded image bytes
+// (Buffer/Uint8Array/ArrayBuffer).
+async function readImageSource(source) {
+  if (typeof source === 'string') return fs.promises.readFile(source);
+  if (Buffer.isBuffer(source)) return source;
+  if (source instanceof ArrayBuffer) return Buffer.from(new Uint8Array(source));
+  if (ArrayBuffer.isView(source)) {
+    return Buffer.from(source.buffer, source.byteOffset, source.byteLength);
+  }
+  throw new Error(
+    'cform: image must be a filesystem path, Buffer, Uint8Array or ArrayBuffer');
+}
+
+async function renderImage(source, options) {
   const { columns, rows } = terminalSize(options);
   const placement = options.imagePlacement ?? 'right';
   const availableWidth = Math.max(
@@ -198,7 +211,7 @@ async function renderImage(file, options) {
   );
 
   const chafa = await loadChafa();
-  const buffer = await fs.promises.readFile(file);
+  const buffer = await readImageSource(source);
   const data = buffer.buffer.slice(
     buffer.byteOffset,
     buffer.byteOffset + buffer.byteLength,
@@ -494,14 +507,14 @@ async function loadCform(options = {}) {
     }
   }
 
-  async function prepareImage(file, imageOptions = {}) {
-    if (!file) {
+  async function prepareImage(source, imageOptions = {}) {
+    if (!source) {
       artwork = null;
       artworkImage = null;
       return null;
     }
     artworkOptions = { ...options, ...imageOptions };
-    const rendered = await renderImage(file, artworkOptions);
+    const rendered = await renderImage(source, artworkOptions);
     artwork = rendered;
     artworkImage = rendered.image;
     return { width: rendered.width, height: rendered.height };
