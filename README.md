@@ -121,12 +121,13 @@ const cform = await loadCform({
 `imageCaption` is plain text (`\n` for multiple lines). It replaces the
 caption rows of the image with a solid band, so it stays readable over any
 artwork; longer lines are clipped to the image width. `imageCaptionPosition`
-accepts `top`, `center`, `bottom`, `none`, or a number in `0..1` (0 = first row,
-1 = last row). The same options exist as `--image-caption*` CLI flags.
+accepts `top`, `center`/`middle`, `bottom`, `none`, or a number in `0..1`
+(0 = first row, 1 = last row). The same options exist as `--image-caption*`
+CLI flags.
 
-With `imageCaptionBackground: 'none'` or `'transparent'` (or `--image-caption-bg none`) the caption
-is composited cell-by-cell: the glyphs are replaced but each cell keeps its
-original background color. `imageCaptionColor: 'none'` likewise keeps the
+With `imageCaptionBackground: 'none'` or `'transparent'` (or
+`--image-caption-bg none`) the caption is composited cell-by-cell: the glyphs
+are replaced but each cell keeps its original background color. `imageCaptionColor: 'none'` likewise keeps the
 original foreground; by default the text is white. `imageCaptionBold` and
 `imageCaptionItalic` add font styling (set both for bold italic).
 
@@ -207,7 +208,7 @@ fields /path/to/doc.json
     │   └──    inner "x" ✓
     ├──   tags (unset)
     └──    legacy 1 error: unknown property
- ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+o:prompt  ctrl+f:tree  q:done          7/7
+ ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  sp:info  ctrl+o:prompt  ctrl+f:tree  q:done          7/7
 ```
 
 - The tree mirrors the **document**: objects/arrays expand with `→` (`l`) and
@@ -221,7 +222,7 @@ fields /path/to/doc.json
   the node is valid, and `(unset)` for optional keys that are absent. Required
   missing fields read `error: missing required field`; unknown keys under
   `additionalProperties: false` read `error: unknown property`.
-- `enter` (or space) fills/edits the selected node with the usual prompt series:
+- `enter` fills/edits the selected node with the usual prompt series:
   selecting an **object** runs its fields as prompts, an array runs the
   item/add prompts, a leaf runs its single prompt. Values already present in the
   document are pre-filled and override the autocomplete/default, and objects are
@@ -233,6 +234,9 @@ fields /path/to/doc.json
   objects/arrays recursively). Adding a member or editing an absent schema-less
   value asks for a **type** first (`string`, `number`, `boolean`, `object`,
   `array`, `null`, or an explicit `JSON`).
+- **`space`** toggles a popup with the selected field's `description` (or
+  `(no description)` when it has none). The popup wraps its text in a
+  `┌─┐`/`│`/`└─┘` box near the cursor; `space` again closes it.
 - **`ctrl+f`** returns to the tree from any prompt. Fields already answered
   during the current edit are written to the document immediately (the walker
   reports each finalized value), so the tree shows them right away and

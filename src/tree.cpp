@@ -380,6 +380,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
   std::vector<TreeRow> rows;
   int cursor = 0;
   int scroll = 0;
+  bool popup_visible = false;
   std::optional<Path> restore_to;
   std::optional<LastPrompt> last_prompt;
 
@@ -462,9 +463,18 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       lines.push_back(render_row(rows[index], index == cursor));
     }
     lines.push_back(footer(
-        " ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+o:prompt  ctrl+f:tree  q:done ",
+        " ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  sp:info  ctrl+o:prompt  ctrl+f:tree  q:done ",
         std::to_string(cursor + 1) + "/" + std::to_string(rows.size()), width));
-    ui.render_lines(lines, true, true);
+
+    std::optional<Popup> popup;
+    if (popup_visible) {
+      const TreeRow& row = rows[cursor];
+      const Json node = apply_conditionals(
+          row.schema, row.present ? row.value : Json::null(), root_schema);
+      popup = Popup{full_hint(node).value_or("(no description)"),
+                    1 + cursor - scroll};
+    }
+    ui.render_lines(lines, true, true, popup ? &*popup : nullptr);
 
     const Key key = ui.read_key();
     if (key.ctrl && key.name == "c")
@@ -519,6 +529,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       continue;
     }
     if (key.ctrl && key.name == "o") {
+      popup_visible = false;
       if (last_prompt && ui.begin_prompt_replay()) {
         restore_to = last_prompt->path;
         run_walker(last_prompt->schema, last_prompt->path,
@@ -526,8 +537,12 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       }
       continue;
     }
-    if (key.name == "return" || key.name == "space" ||
-        (key.has_str && key.str == " ")) {
+    if (key.name == "space" || (key.has_str && key.str == " ")) {
+      popup_visible = !popup_visible;
+      continue;
+    }
+    if (key.name == "return") {
+      popup_visible = false;
       open_row(rows[cursor]);
       continue;
     }

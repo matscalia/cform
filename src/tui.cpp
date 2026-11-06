@@ -74,6 +74,61 @@ std::string fit_line(const std::string& text, std::size_t columns) {
   return out;
 }
 
+std::string first_cells(const std::string& text, std::size_t cells) {
+  if (cells == 0) return {};
+  std::string out;
+  std::size_t visible = 0;
+  for (std::size_t index = 0; index < text.size();) {
+    const unsigned char ch = static_cast<unsigned char>(text[index]);
+    if (ch == '\x1b' && index + 1 < text.size() && text[index + 1] == '[') {
+      const std::size_t start = index;
+      index += 2;
+      while (index < text.size()) {
+        const unsigned char code = static_cast<unsigned char>(text[index]);
+        index++;
+        if (code >= '@' && code <= '~') break;
+      }
+      out.append(text, start, index - start);
+      continue;
+    }
+    std::size_t length = 1;
+    if ((ch & 0xE0) == 0xC0) length = 2;
+    else if ((ch & 0xF0) == 0xE0) length = 3;
+    else if ((ch & 0xF8) == 0xF0) length = 4;
+    if (index + length > text.size()) length = 1;
+    if (visible >= cells) break;
+    out.append(text, index, length);
+    visible++;
+    index += length;
+  }
+  return out;
+}
+
+std::string skip_cells(const std::string& text, std::size_t cells) {
+  std::size_t visible = 0;
+  std::size_t index = 0;
+  while (index < text.size() && visible < cells) {
+    const unsigned char ch = static_cast<unsigned char>(text[index]);
+    if (ch == '\x1b' && index + 1 < text.size() && text[index + 1] == '[') {
+      index += 2;
+      while (index < text.size()) {
+        const unsigned char code = static_cast<unsigned char>(text[index]);
+        index++;
+        if (code >= '@' && code <= '~') break;
+      }
+      continue;
+    }
+    std::size_t length = 1;
+    if ((ch & 0xE0) == 0xC0) length = 2;
+    else if ((ch & 0xF0) == 0xE0) length = 3;
+    else if ((ch & 0xF8) == 0xF0) length = 4;
+    if (index + length > text.size()) length = 1;
+    index += length;
+    visible++;
+  }
+  return text.substr(index);
+}
+
 std::vector<std::string> wrap_text(std::string_view text, std::size_t width) {
   if (width < 1) width = 1;
   std::vector<std::string> lines;
@@ -451,6 +506,67 @@ struct PromptUI::Impl {
     return true;
   }
 
+  void apply_popup(std::vector<std::string>& frame_rows, const Popup& popup,
+                   std::size_t width, std::size_t terminal_height) {
+    if (frame_rows.size() < 3) return;
+    const std::size_t available = text_width();
+    if (available < 8 || width < 8) return;
+    const int popup_width =
+        static_cast<int>(std::min<std::size_t>(60, available - 4));
+    if (popup_width < 4) return;
+    const int inner_width = popup_width - 4;
+    const int max_lines =
+        std::min(10, static_cast<int>(terminal_height) - 4);
+    if (max_lines < 1) return;
+    const int frame_capacity =
+        std::max(1, static_cast<int>(frame_rows.size()) - 2);
+
+    std::vector<std::string> lines = wrap_text(popup.text, inner_width);
+    if (lines.empty()) lines.emplace_back();
+    const int line_count =
+        std::min({static_cast<int>(lines.size()), max_lines, frame_capacity});
+    const int popup_height = line_count + 2;
+
+    const int anchor =
+        std::max(0, std::min(popup.anchor_line,
+                             static_cast<int>(frame_rows.size()) - 1));
+    int top = anchor + 1;
+    if (top + popup_height >= static_cast<int>(frame_rows.size()))
+      top = anchor - popup_height;
+    top = std::max(
+        0, std::min(top, static_cast<int>(frame_rows.size()) - popup_height));
+
+    int col = std::min(3, static_cast<int>(available) - popup_width - 1);
+    col = std::max(0, col);
+
+    auto replace_row = [&](int row, const std::string& box) {
+      if (row < 0 || row >= static_cast<int>(frame_rows.size())) return;
+      std::string line = first_cells(frame_rows[row], col);
+      const std::size_t prefix = visible_length(line);
+      if (prefix < static_cast<std::size_t>(col))
+        line.append(static_cast<std::size_t>(col) - prefix, ' ');
+      line += RESET;
+      line += box;
+      const std::size_t cells = visible_length(line);
+      if (cells < available) line.append(available - cells, ' ');
+      line += skip_cells(frame_rows[row], available);
+      frame_rows[row] = std::move(line);
+    };
+
+    std::string horizontal;
+    for (int index = 0; index < popup_width - 2; index++)
+      horizontal += "─";
+    replace_row(top, "┌" + horizontal + "┐");
+    for (int index = 0; index < line_count; index++) {
+      std::string text = lines[index];
+      const std::size_t cells = visible_length(text);
+      if (cells < static_cast<std::size_t>(inner_width))
+        text.append(static_cast<std::size_t>(inner_width) - cells, ' ');
+      replace_row(top + 1 + index, "│ " + text + " │");
+    }
+    replace_row(top + line_count + 1, "└" + horizontal + "┘");
+  }
+
   void clear() {
     if (rows > 0) {
       if (rows > 1) write_all("\x1b[" + std::to_string(rows - 1) + "A");
@@ -462,7 +578,7 @@ struct PromptUI::Impl {
 
   void render(const std::vector<std::string>& content,
               bool pin_last_line = false, bool show_artwork = true,
-              bool use_history = true) {
+              bool use_history = true, const Popup* popup = nullptr) {
     if (!use_history) history.clear();
     history_mode = false;
     const std::size_t width = columns();
@@ -559,6 +675,7 @@ struct PromptUI::Impl {
     };
 
     std::vector<std::string> frame_rows;
+    int content_row_offset = 0;
     if (large_enough && artwork_layout.placement == ArtworkPlacement::Above &&
         width >= art_width + margin &&
         height >= art_height + content.size() + 1) {
@@ -569,6 +686,7 @@ struct PromptUI::Impl {
         row += artwork->lines[index];
         frame_rows.push_back(std::move(row));
       }
+      content_row_offset = static_cast<int>(art_height);
       for (const std::string& line : content)
         frame_rows.push_back(fit_line(line, width));
     } else if (large_enough && artwork_layout.placement == ArtworkPlacement::Right &&
@@ -638,6 +756,12 @@ struct PromptUI::Impl {
       frame_rows.reserve(content.size());
       for (const std::string& line : content)
         frame_rows.push_back(fit_line(line, width));
+    }
+
+    if (popup) {
+      Popup adjusted = *popup;
+      adjusted.anchor_line += content_row_offset;
+      apply_popup(frame_rows, adjusted, width, height);
     }
 
     const bool resized =
@@ -1644,8 +1768,9 @@ void PromptUI::close() { impl_->close(); }
 Key PromptUI::read_key() { return impl_->next_key(); }
 
 void PromptUI::render_lines(const std::vector<std::string>& lines,
-                            bool pin_last_line, bool show_artwork) {
-  impl_->render(lines, pin_last_line, show_artwork, false);
+                            bool pin_last_line, bool show_artwork,
+                            const Popup* popup) {
+  impl_->render(lines, pin_last_line, show_artwork, false, popup);
 }
 
 void PromptUI::clear_lines() { impl_->clear(); }

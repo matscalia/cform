@@ -68,6 +68,13 @@ class TreeJump : public std::exception {
   const char* what() const noexcept override { return "tree jump"; }
 };
 
+/// Overlay box drawn near a content line, used by the tree screen.
+struct Popup {
+  std::string text;
+  /// 0-based index in the content passed to render_lines().
+  int anchor_line = 0;
+};
+
 /// one decoded key press
 struct Key {
   std::string name;
@@ -122,7 +129,8 @@ class PromptUI : public Prompter {
   Key read_key();
   void render_lines(const std::vector<std::string>& lines,
                     bool pin_last_line = false,
-                    bool show_artwork = true);
+                    bool show_artwork = true,
+                    const Popup* popup = nullptr);
   void clear_lines();
   int terminal_rows() const;
   int terminal_columns() const;

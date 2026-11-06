@@ -101,5 +101,11 @@ else()
               ${CMAKE_CURRENT_SOURCE_DIR}/test/resume_test.py
               $<TARGET_FILE:cform>
     )
+    add_test(
+      NAME popup
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/test/popup_test.py
+              $<TARGET_FILE:cform>
+    )
   endif()
 endif()
