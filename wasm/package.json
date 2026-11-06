@@ -7,7 +7,8 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "build/cform.js"
+    "build/cform.js",
+    "build/cform.d.ts"
   ],
   "engines": {
     "node": ">=18"

@@ -33,6 +33,7 @@ if(EMSCRIPTEN)
     "-sSINGLE_FILE=1"
     "-sSTACK_SIZE=1048576"
     "-sEXPORTED_RUNTIME_METHODS=HEAPU8"
+    "--emit-tsd=${CMAKE_CURRENT_SOURCE_DIR}/wasm/build/cform.d.ts"
   )
   set_target_properties(cform_wasm PROPERTIES
     OUTPUT_NAME cform

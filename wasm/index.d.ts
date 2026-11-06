@@ -1,5 +1,17 @@
 /// <reference types="node" />
 
+/**
+ * The low-level embind bindings (`MainModule`, `RunOptions`, `RunResult`) are
+ * generated at build time into `build/cform.d.ts` by Emscripten's
+ * `--emit-tsd` (see `CMakeLists.txt`). The Node-facing API below is layered on
+ * top of them; `index.js` passes a complete `RunOptions` object to the module.
+ */
+export type {
+  MainModule,
+  RunOptions as ModuleRunOptions,
+  RunResult as ModuleRunResult,
+} from "./build/cform.js";
+
 export interface CformOptions {
   /** TTY stream used for keys. Defaults to `process.stdin`; must have `setRawMode`. */
   input?: NodeJS.ReadStream;
@@ -83,9 +95,8 @@ export interface RunOptions {
   imageCaptionItalic?: boolean;
 }
 
-export interface RunResult {
-  ok: boolean;
-  cancelled: boolean;
+export interface RunResult
+  extends Omit<ModuleRunResult, "value" | "error"> {
   /** Pretty-printed JSON document, empty unless `ok`. */
   value: string;
   error: string;
