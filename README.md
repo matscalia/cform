@@ -32,7 +32,7 @@ simdjson is located through `pkg-config` (`simdjson.pc`). On Debian/Ubuntu:
 
 If `libchafa` is found through `pkg-config` (`chafa.pc`), the native CLI also
 supports `--image` (rendered with chafa; stb_image, fetched through CMake
-`FetchContent`, decodes the file). On Debian/Ubuntu: `apt install libchafa-dev`; on macOS:
+`FetchContent`, decodes the file; libchafa >= 1.6 is required). On Debian/Ubuntu: `apt install libchafa-dev`; on macOS:
 `brew install chafa`. Without it the build still works, just without images.
 `FetchContent` pins `nothings/stb`; for an offline build, pre-populate it and
 pass `-DFETCHCONTENT_SOURCE_DIR_STB=/path/to/stb`.
@@ -109,10 +109,10 @@ const cform = await loadCform({
   image: 'logo.png',
   imagePlacement: 'above',
   imageCaption: 'cform\nprompt schemas',
-  imageCaptionPosition: 'bottom', // or 'center', 'top', 'none', or 0..1
+  imageCaptionPosition: 'bottom', // or 'center'/'middle', 'top', 'none', or 0..1
   imageCaptionAlign: 'center',
   imageCaptionColor: '#ffffff',
-  imageCaptionBackground: '#000000', // or 'none' to keep the image background
+  imageCaptionBackground: '#000000', // or 'none'/'transparent' to keep the image background
   imageCaptionBold: true,
   imageCaptionItalic: true,
 });
@@ -124,7 +124,7 @@ artwork; longer lines are clipped to the image width. `imageCaptionPosition`
 accepts `top`, `center`, `bottom`, `none`, or a number in `0..1` (0 = first row,
 1 = last row). The same options exist as `--image-caption*` CLI flags.
 
-With `imageCaptionBackground: 'none'` (or `--image-caption-bg none`) the caption
+With `imageCaptionBackground: 'none'` or `'transparent'` (or `--image-caption-bg none`) the caption
 is composited cell-by-cell: the glyphs are replaced but each cell keeps its
 original background color. `imageCaptionColor: 'none'` likewise keeps the
 original foreground; by default the text is white. `imageCaptionBold` and
@@ -173,15 +173,16 @@ usage: cform [options] [document]
                     optional caps; 0 = no cap (default)
   --image-caption <text>
                     plain-text caption drawn over the image
-  --image-caption-position <top|center|bottom|none|0..1>
+  --image-caption-position <top|center|middle|bottom|none|0..1>
                     caption row (default bottom)
   --image-caption-align <left|center|right>
                     caption alignment (default center)
   --image-caption-padding <n>
                     cells between caption and image edge (default 1)
-  --image-caption-color <rrggbb|none>, --image-caption-bg <rrggbb|none>
+  --image-caption-color <rrggbb|none|transparent>,
+  --image-caption-bg <rrggbb|none|transparent>
                     caption colors (default ffffff on 000000;
-                    none keeps the image's original color)
+                    none/transparent keep the image color)
   --image-caption-bold, --image-caption-italic
                     caption font style (combine for both)
 ```
@@ -206,7 +207,7 @@ fields /path/to/doc.json
     │   └──    inner "x" ✓
     ├──   tags (unset)
     └──    legacy 1 error: unknown property
- ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+f:tree  q:done          7/7
+ ↑↓/jk:nav  ←/h:fold  →/l:open  enter:edit  ctrl+o:prompt  ctrl+f:tree  q:done          7/7
 ```
 
 - The tree mirrors the **document**: objects/arrays expand with `→` (`l`) and

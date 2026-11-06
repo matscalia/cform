@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <poll.h>
 #include <stdexcept>
 #include <sys/ioctl.h>
@@ -46,12 +47,12 @@ class PosixTerminal : public Terminal {
       input_fd_ = output_fd_ = -1;
       throw std::runtime_error("cannot read the terminal mode");
     }
-    set_raw(true);
-    last_columns_ = columns();
-    last_rows_ = rows();
+    set_raw_impl(true);
+    last_columns_ = read_columns();
+    last_rows_ = read_rows();
   }
 
-  ~PosixTerminal() override { close(); }
+  ~PosixTerminal() override { close_impl(); }
 
   void write(const std::string& data) override {
     std::size_t offset = 0;
@@ -107,43 +108,13 @@ class PosixTerminal : public Terminal {
     return false;
   }
 
-  int columns() override {
-    struct winsize size {};
-    if (ioctl(output_fd_, TIOCGWINSZ, &size) == 0 && size.ws_col > 0)
-      return size.ws_col;
-    return 80;
-  }
+  int columns() override { return read_columns(); }
 
-  int rows() override {
-    struct winsize size {};
-    if (ioctl(output_fd_, TIOCGWINSZ, &size) == 0 && size.ws_row > 0)
-      return size.ws_row;
-    return 24;
-  }
+  int rows() override { return read_rows(); }
 
-  void set_raw(bool enabled) override {
-    if (input_fd_ < 0) return;
-    if (enabled) {
-      struct termios raw_mode = original_;
-      cfmakeraw(&raw_mode);
-      // keep output post-processing off but write explicit "\r\n"
-      tcsetattr(input_fd_, TCSAFLUSH, &raw_mode);
-      raw_ = true;
-    } else {
-      tcsetattr(input_fd_, TCSAFLUSH, &original_);
-      raw_ = false;
-    }
-  }
+  void set_raw(bool enabled) override { set_raw_impl(enabled); }
 
-  void close() override {
-    if (closed_) return;
-    closed_ = true;
-    set_raw(false);
-    if (input_fd_ >= 0) ::close(input_fd_);
-    if (output_fd_ >= 0) ::close(output_fd_);
-    input_fd_ = -1;
-    output_fd_ = -1;
-  }
+  void close() override { close_impl(); }
 
   std::string current_directory() override {
     char buffer[4096];
@@ -186,15 +157,9 @@ class PosixTerminal : public Terminal {
     std::system((editor_command + " \"" + file + "\"").c_str());
     std::string edited;
     {
-      FILE* handle = std::fopen(file.c_str(), "rb");
-      if (handle) {
-        char buffer[4096];
-        std::size_t count;
-        while ((count = std::fread(buffer, 1, sizeof(buffer), handle)) > 0) {
-          edited.append(buffer, count);
-        }
-        std::fclose(handle);
-      }
+      std::ifstream stream(file, std::ios::binary);
+      edited.assign(std::istreambuf_iterator<char>(stream),
+                    std::istreambuf_iterator<char>());
     }
     std::filesystem::remove_all(directory);
     value = std::move(edited);
@@ -204,10 +169,45 @@ class PosixTerminal : public Terminal {
   std::string editor_name() override { return choose_editor(); }
 
  private:
+  int read_columns() {
+    struct winsize size {};
+    if (ioctl(output_fd_, TIOCGWINSZ, &size) == 0 && size.ws_col > 0)
+      return size.ws_col;
+    return 80;
+  }
+
+  int read_rows() {
+    struct winsize size {};
+    if (ioctl(output_fd_, TIOCGWINSZ, &size) == 0 && size.ws_row > 0)
+      return size.ws_row;
+    return 24;
+  }
+
+  void set_raw_impl(bool enabled) {
+    if (input_fd_ < 0) return;
+    if (enabled) {
+      struct termios raw_mode = original_;
+      cfmakeraw(&raw_mode);
+      // keep output post-processing off but write explicit "\r\n"
+      tcsetattr(input_fd_, TCSAFLUSH, &raw_mode);
+    } else {
+      tcsetattr(input_fd_, TCSAFLUSH, &original_);
+    }
+  }
+
+  void close_impl() {
+    if (closed_) return;
+    closed_ = true;
+    set_raw_impl(false);
+    if (input_fd_ >= 0) ::close(input_fd_);
+    if (output_fd_ >= 0) ::close(output_fd_);
+    input_fd_ = -1;
+    output_fd_ = -1;
+  }
+
   int input_fd_ = -1;
   int output_fd_ = -1;
   struct termios original_ {};
-  bool raw_ = false;
   bool closed_ = false;
   int last_columns_ = 0;
   int last_rows_ = 0;

@@ -542,6 +542,45 @@ void test_allof_and_refs() {
   const Run result = run(root, script);
   check("allOf: reference properties are merged",
         same(result.value, parse(R"({"base":"b","extra":"e"})")));
+
+  const Json overlapping = parse(R"({
+    "type":"object",
+    "properties":{"name":{"type":"string"}},
+    "allOf":[
+      {"properties":{"name":{"minLength":2}}},
+      {"properties":{"name":{"maxLength":4}}}
+    ]
+  })");
+  check("allOf: overlapping property keeps minLength",
+        !validate_value(overlapping, parse(R"({"name":"x"})"), overlapping)
+             .empty());
+  check("allOf: overlapping property keeps maxLength",
+        !validate_value(overlapping, parse(R"({"name":"abcde"})"), overlapping)
+             .empty());
+  check("allOf: overlapping property accepts valid value",
+        validate_value(overlapping, parse(R"({"name":"abc"})"), overlapping)
+            .empty());
+
+  const Json required = parse(R"({
+    "required":["a"],
+    "allOf":[{"required":["a","b"]},{"required":["b"]}]
+  })");
+  const Json resolved_required = resolve_ref(required, required);
+  const Json* required_names = resolved_required.get("required");
+  check("allOf: required names are deduplicated",
+        required_names && required_names->is_array() &&
+            required_names->array.size() == 2);
+
+  const Json pointer = parse(R"({
+    "properties":{
+      "base":{"type":"string"},
+      "alias":{"$ref":"#/properties/base"}
+    }
+  })");
+  const Json* alias = pointer.get("properties")->get("alias");
+  check("$ref: internal JSON pointer resolves",
+        alias && primary_type(resolve_ref(*alias, pointer), pointer) ==
+                     "string");
 }
 
 void test_validate_value() {

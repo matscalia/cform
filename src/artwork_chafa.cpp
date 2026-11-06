@@ -1,16 +1,15 @@
 #include "artwork_chafa.hpp"
 
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#pragma GCC diagnostic ignored "-Wunused-function"
-#endif
-
 #include <chafa.h>
 
+// stb_image contains static helpers that are not used by every translation
+// unit; silence only that warning while including it.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
-
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
@@ -50,14 +49,10 @@ std::optional<Artwork> render_artwork_file(const std::string& path,
   if (canvas) {
     chafa_canvas_draw_all_pixels(canvas, CHAFA_PIXEL_RGBA8_UNASSOCIATED, pixels,
                                  image_width, image_height, image_width * 4);
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    GString* ansi = chafa_canvas_build_ansi(canvas);
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+    // A null ChafaTermInfo selects the same fallback terminfo that the
+    // deprecated chafa_canvas_build_ansi() used, so the ANSI bytes are
+    // unchanged while avoiding the deprecated entry point.
+    GString* ansi = chafa_canvas_print(canvas, nullptr);
     if (ansi) {
       artwork = make_artwork(std::string_view(ansi->str, ansi->len));
       g_string_free(ansi, TRUE);

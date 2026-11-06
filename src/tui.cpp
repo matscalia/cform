@@ -107,7 +107,6 @@ std::vector<std::string> wrap_text(std::string_view text, std::size_t width) {
     if (line_cells > 0) {
       lines.push_back(line);
       line.clear();
-      line_cells = 0;
     }
 
     // Break a word that is wider than the available columns.
@@ -325,38 +324,39 @@ std::string render_input(const std::string& value, std::size_t cursor,
 
 struct PromptUI::Impl {
   std::unique_ptr<Terminal> terminal;
-  bool closed = false;
-  bool tree_mode = false;
-  int rows = 0;
-  std::string lib_dir;
-  std::string base_dir;
-  std::optional<int> fixed_columns;
-
-  std::string pending;
-  std::vector<Key> key_queue;
   std::size_t key_position = 0;
-  std::optional<Artwork> artwork;
-  ArtworkLayout artwork_layout;
-  ArtworkProvider artwork_provider;
-  std::vector<std::string> history;
-  bool history_mode = false;
-  std::vector<std::string> last_frame;
   std::size_t last_columns = 0;
-  int last_terminal_rows = 0;
 
   // Prompt key recording: ctrl+o replays the keys of the previous prompts to
   // restore the exact same prompt (including typed text and selections).
-  std::vector<Key> prompt_keys;
-  bool recording_keys = false;
-  std::vector<std::vector<Key>> session_keys;
-  std::optional<std::size_t> interrupted_prompt;
-  bool replay_active = false;
   std::size_t replay_next = 0;
   std::size_t replay_target = 0;
-  std::vector<Key> replay_prefix;
-  bool replay_skip_record = false;
-  std::vector<Key> key_replay;
   std::size_t key_replay_pos = 0;
+  std::optional<std::size_t> interrupted_prompt;
+  std::vector<Key> key_queue;
+  std::vector<std::string> history;
+  std::vector<std::string> last_frame;
+  std::vector<Key> prompt_keys;
+  std::vector<std::vector<Key>> session_keys;
+  std::vector<Key> replay_prefix;
+  std::vector<Key> key_replay;
+
+  std::string lib_dir;
+  std::string base_dir;
+  std::string pending;
+  ArtworkProvider artwork_provider;
+  std::optional<Artwork> artwork;
+  ArtworkLayout artwork_layout;
+
+  int rows = 0;
+  int last_terminal_rows = 0;
+  std::optional<int> fixed_columns;
+  bool closed = false;
+  bool tree_mode = false;
+  bool history_mode = false;
+  bool recording_keys = false;
+  bool replay_active = false;
+  bool replay_skip_record = false;
 
   Impl(Options options) : terminal(make_terminal()) {
     if (options.lib_dir) lib_dir = *options.lib_dir;
@@ -1662,13 +1662,13 @@ void PromptUI::set_artwork(std::optional<Artwork> artwork,
                           ArtworkLayout layout) {
   if (artwork) apply_artwork_caption(*artwork, layout);
   impl_->artwork = std::move(artwork);
-  impl_->artwork_layout = layout;
+  impl_->artwork_layout = std::move(layout);
 }
 
 void PromptUI::set_artwork_provider(ArtworkProvider provider,
                                    ArtworkLayout layout) {
   impl_->artwork_provider = std::move(provider);
-  impl_->artwork_layout = layout;
+  impl_->artwork_layout = std::move(layout);
 }
 
 bool PromptUI::refresh_artwork() { return impl_->refresh_artwork(); }

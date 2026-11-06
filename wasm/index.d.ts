@@ -29,8 +29,6 @@ export interface CformOptions {
   baseDir?: string;
   /** Start by prompting the root; ctrl+f returns to the tree. */
   promptRoot?: boolean;
-  /** @deprecated use `promptRoot`. */
-  promptOnly?: boolean;
   /** Image shown on the right when it fits. Requires `chafa-wasm`. */
   image?: string;
   /** Rendered image size in terminal cells (defaults to the full TUI height,
@@ -53,12 +51,12 @@ export interface CformOptions {
   imagePlacement?: 'right' | 'above';
   /** Plain-text caption drawn over the image (use `\n` for multiple lines). */
   imageCaption?: string;
-  imageCaptionPosition?: 'top' | 'center' | 'bottom' | 'none' | number;
+  imageCaptionPosition?: 'top' | 'center' | 'middle' | 'bottom' | 'none' | number;
   imageCaptionAlign?: 'left' | 'center' | 'right';
   imageCaptionPadding?: number;
-  /** `#rrggbb`/`rrggbb`, packed number, default white; `none` keeps the image fg. */
+  /** `#rrggbb`/`rrggbb`, packed number, default white; `none`/`transparent` keeps the image fg. */
   imageCaptionColor?: string | number;
-  /** `#rrggbb`/`rrggbb`, packed number, or `none` (keeps the image bg). */
+  /** `#rrggbb`/`rrggbb`, packed number, or `none`/`transparent` (keeps the image bg). */
   imageCaptionBackground?: string | number;
   /** Bold caption text. */
   imageCaptionBold?: boolean;
@@ -73,8 +71,6 @@ export interface RunOptions {
   baseDir?: string;
   columns?: number;
   promptRoot?: boolean;
-  /** @deprecated use `promptRoot`. */
-  promptOnly?: boolean;
   imageMinWidth?: number;
   imageMinHeight?: number;
   imageMinContentWidth?: number;
@@ -84,7 +80,7 @@ export interface RunOptions {
   imageMaxHeight?: number;
   imagePlacement?: 'right' | 'above';
   imageCaption?: string;
-  imageCaptionPosition?: 'top' | 'center' | 'bottom' | 'none' | number;
+  imageCaptionPosition?: 'top' | 'center' | 'middle' | 'bottom' | 'none' | number;
   imageCaptionAlign?: 'left' | 'center' | 'right';
   imageCaptionPadding?: number;
   imageCaptionColor?: string | number;

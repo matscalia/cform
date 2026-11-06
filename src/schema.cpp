@@ -51,19 +51,52 @@ std::string unescape_ref(std::string_view name) {
 }
 
 const Json* lookup_ref(const std::string& ref, const Json& root) {
+  if (ref.empty() || ref[0] != '#') return nullptr;
+
+  // Preserve the historical fallback from `$defs` to `definitions`.
   std::string name;
   if (ref.rfind("#/$defs/", 0) == 0) {
     name = ref.substr(8);
   } else if (ref.rfind("#/definitions/", 0) == 0) {
     name = ref.substr(14);
-  } else {
-    return nullptr;
   }
-  name = unescape_ref(name);
-  const Json* defs = root.get("$defs");
-  if (!defs) defs = root.get("definitions");
-  if (!defs || !defs->is_object()) return nullptr;
-  return defs->get(name);
+  if (!name.empty()) {
+    name = unescape_ref(name);
+    const Json* defs = root.get("$defs");
+    if (!defs) defs = root.get("definitions");
+    if (!defs || !defs->is_object()) return nullptr;
+    return defs->get(name);
+  }
+
+  if (ref == "#") return &root;
+  if (ref.size() < 2 || ref[1] != '/') return nullptr;
+
+  // Generic JSON Pointer (RFC 6901), e.g. `#/properties/name`.
+  const Json* current = &root;
+  std::size_t start = 1;
+  while (start < ref.size()) {
+    const std::size_t slash = ref.find('/', start + 1);
+    const std::size_t end =
+        slash == std::string::npos ? ref.size() : slash;
+    const std::string token =
+        unescape_ref(std::string_view(ref).substr(start + 1, end - start - 1));
+    if (current->is_object()) {
+      current = current->get(token);
+    } else if (current->is_array()) {
+      char* parsed_end = nullptr;
+      const long index = std::strtol(token.c_str(), &parsed_end, 10);
+      if (token.empty() || *parsed_end != '\0' || index < 0 ||
+          static_cast<std::size_t>(index) >= current->array.size())
+        return nullptr;
+      current = &current->array[static_cast<std::size_t>(index)];
+    } else {
+      return nullptr;
+    }
+    if (!current) return nullptr;
+    if (slash == std::string::npos) break;
+    start = slash;
+  }
+  return current;
 }
 
 bool truthy(const Json* value) {
@@ -166,55 +199,75 @@ Json combine_schemas(const Json& first, const Json& second) {
   return combined;
 }
 
+void merge_properties(Json& merged, const Json& part,
+                      const std::set<std::string>& parent_keys = {}) {
+  const Json* part_props = part.get("properties");
+  if (!part_props || !part_props->is_object()) return;
+
+  Json props = Json::object_value();
+  if (const Json* own = merged.get("properties"); own && own->is_object())
+    props = *own;
+  for (const auto& entry : part_props->object) {
+    const Json* existing = props.get(entry.first);
+    if (!existing) {
+      props.set(entry.first, entry.second);
+    } else if (parent_keys.count(entry.first)) {
+      // Keep the node's own property first for scalar-key precedence, while
+      // retaining the part's constraints in an allOf.
+      props.set(entry.first, combine_schemas(*existing, entry.second));
+    } else {
+      // A later allOf part comes first, matching the old precedence.
+      props.set(entry.first, combine_schemas(entry.second, *existing));
+    }
+  }
+  merged.set("properties", std::move(props));
+}
+
+void merge_pattern_properties(Json& merged, const Json& part,
+                              const std::set<std::string>& parent_keys = {}) {
+  const Json* part_patterns = part.get("patternProperties");
+  if (!part_patterns || !part_patterns->is_object()) return;
+
+  Json patterns = Json::object_value();
+  if (const Json* own = merged.get("patternProperties");
+      own && own->is_object())
+    patterns = *own;
+  for (const auto& entry : part_patterns->object) {
+    const Json* existing = patterns.get(entry.first);
+    if (!existing) {
+      patterns.set(entry.first, entry.second);
+    } else if (parent_keys.count(entry.first)) {
+      patterns.set(entry.first, combine_schemas(*existing, entry.second));
+    } else {
+      patterns.set(entry.first, combine_schemas(entry.second, *existing));
+    }
+  }
+  merged.set("patternProperties", std::move(patterns));
+}
+
+void merge_required(Json& merged, const Json& part) {
+  const Json* part_required = part.get("required");
+  if (!part_required || !part_required->is_array()) return;
+
+  std::vector<Json> required;
+  std::set<std::string> seen;
+  auto append = [&](const Json& item) {
+    if (item.is_string() && !seen.insert(item.string).second) return;
+    required.push_back(item);
+  };
+  if (const Json* own = merged.get("required"); own && own->is_array()) {
+    for (const Json& item : own->array) append(item);
+  }
+  for (const Json& item : part_required->array) append(item);
+  merged.set("required", Json::array_value(std::move(required)));
+}
+
 void merge_branch(Json& merged, const Json& part) {
   if (!part.is_object()) return;
 
-  const Json* part_props = part.get("properties");
-  if (part_props && part_props->is_object()) {
-    Json props = Json::object_value();
-    if (const Json* own = merged.get("properties"); own && own->is_object())
-      props = *own;
-    for (const auto& entry : part_props->object) {
-      if (const Json* existing = props.get(entry.first))
-        props.set(entry.first, combine_schemas(*existing, entry.second));
-      else
-        props.set(entry.first, entry.second);
-    }
-    merged.set("properties", std::move(props));
-  }
-
-  const Json* part_patterns = part.get("patternProperties");
-  if (part_patterns && part_patterns->is_object()) {
-    Json patterns = Json::object_value();
-    if (const Json* own = merged.get("patternProperties");
-        own && own->is_object())
-      patterns = *own;
-    for (const auto& entry : part_patterns->object) {
-      if (const Json* existing = patterns.get(entry.first))
-        patterns.set(entry.first, combine_schemas(*existing, entry.second));
-      else
-        patterns.set(entry.first, entry.second);
-    }
-    merged.set("patternProperties", std::move(patterns));
-  }
-
-  const Json* part_required = part.get("required");
-  if (part_required && part_required->is_array()) {
-    std::vector<Json> required;
-    std::set<std::string> seen;
-    if (const Json* own = merged.get("required"); own && own->is_array()) {
-      for (const Json& item : own->array) {
-        if (item.is_string()) seen.insert(item.string);
-        required.push_back(item);
-      }
-    }
-    for (const Json& item : part_required->array) {
-      if (!item.is_string() || seen.count(item.string)) continue;
-      seen.insert(item.string);
-      required.push_back(item);
-    }
-    merged.set("required", Json::array_value(std::move(required)));
-  }
+  merge_properties(merged, part);
+  merge_pattern_properties(merged, part);
+  merge_required(merged, part);
 
   static const char* keywords[] = {
       "type",          "items",            "additionalProperties",
@@ -292,6 +345,16 @@ Json merge_all_of(const Json& node, const Json& root) {
   Json conditional_parts = Json::array_value();
   bool has_conditionals = false;
 
+  std::set<std::string> parent_properties;
+  if (const Json* own = merged.get("properties"); own && own->is_object()) {
+    for (const auto& entry : own->object) parent_properties.insert(entry.first);
+  }
+  std::set<std::string> parent_patterns;
+  if (const Json* own = merged.get("patternProperties");
+      own && own->is_object()) {
+    for (const auto& entry : own->object) parent_patterns.insert(entry.first);
+  }
+
   auto add_conditional = [&](const Json& part) {
     Json conditional = Json::object_value();
     bool has = false;
@@ -316,38 +379,9 @@ Json merge_all_of(const Json& node, const Json& root) {
   for (const Json& raw_part : all_of->array) {
     const Json part = resolve_ref(raw_part, root);
 
-    const Json* part_props = part.get("properties");
-    if (part_props && part_props->is_object()) {
-      Json props = Json::object_value();
-      for (const auto& entry : part_props->object) props.set(entry.first, entry.second);
-      if (const Json* own = merged.get("properties"); own && own->is_object()) {
-        for (const auto& entry : own->object) props.set(entry.first, entry.second);
-      }
-      merged.set("properties", props);
-    }
-
-    const Json* part_patterns = part.get("patternProperties");
-    if (part_patterns && part_patterns->is_object()) {
-      Json patterns = Json::object_value();
-      for (const auto& entry : part_patterns->object)
-        patterns.set(entry.first, entry.second);
-      if (const Json* own = merged.get("patternProperties");
-          own && own->is_object()) {
-        for (const auto& entry : own->object)
-          patterns.set(entry.first, entry.second);
-      }
-      merged.set("patternProperties", patterns);
-    }
-
-    const Json* part_required = part.get("required");
-    if (part_required && part_required->is_array()) {
-      std::vector<Json> required;
-      if (const Json* own = merged.get("required"); own && own->is_array()) {
-        for (const auto& item : own->array) required.push_back(item);
-      }
-      for (const auto& item : part_required->array) required.push_back(item);
-      merged.set("required", Json::array_value(std::move(required)));
-    }
+    merge_properties(merged, part, parent_properties);
+    merge_pattern_properties(merged, part, parent_patterns);
+    merge_required(merged, part);
 
     static const char* keywords[] = {
         "type",           "items",       "additionalProperties",
@@ -618,6 +652,14 @@ SchemaTypes schema_types(const Json& schema, const Json& root) {
 std::string primary_type(const Json& schema, const Json& root) {
   const SchemaTypes types = schema_types(schema, root);
   return types.empty() ? "unknown" : types.front();
+}
+
+Json empty_document(const Json& root_schema) {
+  const Json root = resolve_ref(root_schema, root_schema);
+  const std::string type = primary_type(root, root_schema);
+  if (type == "array") return Json::array_value();
+  if (type == "object") return Json::object_value();
+  return Json::null();
 }
 
 bool is_null_variant(const Json& schema, const Json& root) {

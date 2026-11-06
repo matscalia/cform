@@ -53,14 +53,6 @@ struct RunResult {
   std::string error;
 };
 
-cform::Json empty_document(const cform::Json& root_schema) {
-  const cform::Json root = cform::resolve_ref(root_schema, root_schema);
-  const std::string type = cform::primary_type(root, root_schema);
-  if (type == "array") return cform::Json::array_value();
-  if (type == "object") return cform::Json::object_value();
-  return cform::Json::null();
-}
-
 RunResult run(const std::string& schema_text, const std::string& document_text,
               const RunOptions& options) {
   RunResult result;
@@ -161,7 +153,7 @@ RunResult run(const std::string& schema_text, const std::string& document_text,
     }
 
     cform::Walker walker(*schema, *prompt_ui);
-    cform::Json value = document ? *document : empty_document(*schema);
+    cform::Json value = document ? *document : cform::empty_document(*schema);
     cform::run_tree(*prompt_ui, *schema, value, walker,
                     document ? "document" : "<new document>",
                     options.promptRoot);

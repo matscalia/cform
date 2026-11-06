@@ -490,7 +490,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       continue;
     }
     if (key.name == "right" || (key.has_str && key.str == "l")) {
-      const TreeRow row = rows[cursor];
+      const TreeRow& row = rows[cursor];
       if (!row.expandable)
         continue;
       if (row.folded) {
@@ -503,7 +503,7 @@ void run_tree(PromptUI &ui, const Json &root_schema, Json &document,
       continue;
     }
     if (key.name == "left" || (key.has_str && key.str == "h")) {
-      const TreeRow row = rows[cursor];
+      const TreeRow& row = rows[cursor];
       if (row.expandable && !row.folded) {
         expanded.erase(path_label(row.path));
         restore_to = row.path;

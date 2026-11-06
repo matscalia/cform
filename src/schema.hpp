@@ -33,6 +33,8 @@ std::vector<std::string> conditional_property_order(const Json& schema,
 
 SchemaTypes schema_types(const Json& schema, const Json& root);
 std::string primary_type(const Json& schema, const Json& root);
+/// Empty value matching the root schema's primary type.
+Json empty_document(const Json& root_schema);
 bool is_null_variant(const Json& schema, const Json& root);
 std::optional<std::vector<Json>> union_variants(const Json& schema,
                                                 const Json& root);

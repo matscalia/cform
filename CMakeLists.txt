@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(EMSCRIPTEN)
   # --- WebAssembly module consumed by wasm/index.js -------------------------
-  add_compile_options(-fexceptions -Wall -Wextra -O2)
+  add_compile_options(-fexceptions -Wall -Wextra)
   add_link_options(-fexceptions -sDISABLE_EXCEPTION_CATCHING=0)
 
   add_library(cform_core STATIC
@@ -56,13 +56,14 @@ else()
   target_include_directories(cform_core PUBLIC src)
   target_compile_definitions(cform_core PUBLIC CFORM_USE_SIMDJSON=1)
   target_link_libraries(cform_core PUBLIC PkgConfig::SIMDJSON)
-  target_compile_options(cform_core PRIVATE -Wall -Wextra -O2)
+  target_compile_options(cform_core PRIVATE -Wall -Wextra)
 
   add_executable(cform src/main.cpp)
   target_link_libraries(cform PRIVATE cform_core)
+  target_compile_options(cform PRIVATE -Wall -Wextra)
 
   # Optional: libchafa renders the right-side artwork from an image file.
-  pkg_check_modules(CHAFA chafa IMPORTED_TARGET)
+  pkg_check_modules(CHAFA chafa>=1.6 IMPORTED_TARGET)
   if(CHAFA_FOUND)
     include(FetchContent)
     FetchContent_Declare(
@@ -81,7 +82,7 @@ else()
   enable_testing()
   add_executable(cform_test test/walker_test.cpp)
   target_link_libraries(cform_test PRIVATE cform_core)
-  target_compile_options(cform_test PRIVATE -Wall -Wextra -O2)
+  target_compile_options(cform_test PRIVATE -Wall -Wextra)
   add_test(NAME walker COMMAND cform_test)
 
   find_package(Python3 COMPONENTS Interpreter QUIET)

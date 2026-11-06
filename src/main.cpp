@@ -53,15 +53,16 @@ void usage(std::ostream& out) {
          "                    optional caps; 0 = no cap (default 0x0)\n"
          "  --image-caption <text>\n"
          "                    plain-text caption drawn over the image\n"
-         "  --image-caption-position <top|center|bottom|none|0..1>\n"
+         "  --image-caption-position <top|center|middle|bottom|none|0..1>\n"
          "                    caption row (default bottom)\n"
          "  --image-caption-align <left|center|right>\n"
          "                    caption alignment (default center)\n"
          "  --image-caption-padding <n>\n"
          "                    cells between caption and image edge (default 1)\n"
-         "  --image-caption-color <rrggbb|none>, --image-caption-bg <rrggbb|none>\n"
+         "  --image-caption-color <rrggbb|none|transparent>,\n"
+         "  --image-caption-bg <rrggbb|none|transparent>\n"
          "                    caption colors (default ffffff on 000000;\n"
-         "                    none keeps the image's original color)\n"
+         "                    none/transparent keep the image color)\n"
          "  --image-caption-bold, --image-caption-italic\n"
          "                    caption font style (combine for both)\n";
 }
@@ -123,14 +124,6 @@ bool parse_caption_position(const std::string& text, float& value) {
   }
 }
 
-cform::Json empty_document(const cform::Json& root_schema) {
-  const cform::Json root = cform::resolve_ref(root_schema, root_schema);
-  const std::string type = cform::primary_type(root, root_schema);
-  if (type == "array") return cform::Json::array_value();
-  if (type == "object") return cform::Json::object_value();
-  return cform::Json::null();
-}
-
 std::optional<cform::Json> read_document(const std::string& path) {
   std::ifstream stream(path);
   if (!stream) {
@@ -140,12 +133,12 @@ std::optional<cform::Json> read_document(const std::string& path) {
   std::string content((std::istreambuf_iterator<char>(stream)),
                       std::istreambuf_iterator<char>());
   std::string error;
-  const auto parsed = cform::Json::parse(content, error);
+  auto parsed = cform::Json::parse(content, error);
   if (!parsed) {
     std::cerr << "cform: " << path << " is not valid JSON: " << error << "\n";
     return std::nullopt;
   }
-  return *parsed;
+  return std::move(*parsed);
 }
 
 }  // namespace
@@ -163,7 +156,7 @@ int main(int argc, char** argv) {
   int image_max_width = 0;
   int image_max_height = 0;
   bool image_above = false;
-  bool prompt_only = false;
+  bool prompt_root = false;
   std::string image_caption;
   float image_caption_position = 1.0f;
   std::string image_caption_align = "center";
@@ -208,7 +201,7 @@ int main(int argc, char** argv) {
       } else if (argument == "--image-caption-position") {
         if (!parse_caption_position(value, image_caption_position)) {
           std::cerr << "cform: --image-caption-position must be top, center, "
-                       "bottom, none or a number in 0..1\n";
+                       "middle, bottom, none or a number in 0..1\n";
           return 2;
         }
       } else if (argument == "--image-caption-align") {
@@ -249,7 +242,7 @@ int main(int argc, char** argv) {
       continue;
     }
     if (argument == "--prompt") {
-      prompt_only = true;
+      prompt_root = true;
       continue;
     }
     if (argument == "--image-caption-bold") {
@@ -366,10 +359,10 @@ int main(int argc, char** argv) {
 
     cform::Walker walker(*parsed, *prompt_ui);
     cform::Json value =
-        document ? *document : empty_document(*parsed);
+        document ? *document : cform::empty_document(*parsed);
     cform::run_tree(*prompt_ui, *parsed, value, walker,
                     document_path.empty() ? "<new document>" : document_path,
-                    prompt_only);
+                    prompt_root);
     prompt_ui->close();
     std::cout << value.to_pretty(2) << "\n";
     return 0;

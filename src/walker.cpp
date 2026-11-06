@@ -183,7 +183,7 @@ Outcome Walker::leaf(const Json& schema, const Path& path,
   const auto hint = full_hint(node);
   const auto schema_default = default_string(schema, node);
   const std::vector<std::string> known = history_values(schema);
-  const std::vector<std::string> suggest = known;
+  const std::vector<std::string>& suggest = known;
   // a value already present in the document overrides the autocomplete default
   const std::optional<std::string> prefilled =
       options.prefill ? prefill_string(*options.prefill) : std::nullopt;
@@ -191,7 +191,7 @@ Outcome Walker::leaf(const Json& schema, const Path& path,
       prefilled ? prefilled
                 : (known.empty() ? schema_default
                                  : std::optional<std::string>(known.front()));
-  const std::optional<std::string> initial = prefilled;
+  const std::optional<std::string>& initial = prefilled;
 
   const Json* format = node.get("format");
   const bool multiline =
@@ -433,7 +433,7 @@ Outcome Walker::object(const Json& schema, const Path& path,
   bool resume = options.resume;
   while (index < property_order.size()) {
     node = apply_conditionals(base, result, root_);
-    const std::string key = property_order[index];
+    const std::string& key = property_order[index];
     const Json* current_properties = node.get("properties");
     const Json* current_schema =
         current_properties ? current_properties->get(key) : nullptr;
@@ -656,7 +656,7 @@ Outcome Walker::record(const Json& schema, const Path& path,
   bool resume = options.resume;
   std::size_t index = resume && !names.empty() ? names.size() - 1 : 0;
   while (index < names.size()) {
-    const std::string name = names[index];
+    const std::string& name = names[index];
     const auto seeded = prefill.get(name);
     Outcome outcome = has_value_schema
                           ? value(*additional, path.with(name),
