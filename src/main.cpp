@@ -40,6 +40,9 @@ void usage(std::ostream& out) {
          "  --prompt          start by prompting the root instead of the tree;\n"
          "                    ctrl+f returns to the tree\n"
          "  --image <file>    show an image on the right when it fits (chafa)\n"
+         "  --use-terminal-theme\n"
+         "                    render image colors with the terminal's 16-color\n"
+         "                    palette instead of truecolor\n"
          "  --image-min-width <n>, --image-min-height <n>\n"
          "                    hide the image below this cell size (default 8x4)\n"
          "  --image-min-content-width <n>\n"
@@ -157,6 +160,7 @@ int main(int argc, char** argv) {
   int image_max_width = 0;
   int image_max_height = 0;
   bool image_above = false;
+  bool use_terminal_theme = false;
   bool prompt_root = false;
   std::string image_caption;
   float image_caption_position = 1.0f;
@@ -242,6 +246,10 @@ int main(int argc, char** argv) {
           return 2;
         }
       }
+      continue;
+    }
+    if (argument == "--use-terminal-theme") {
+      use_terminal_theme = true;
       continue;
     }
     if (argument == "--prompt") {
@@ -335,8 +343,9 @@ int main(int argc, char** argv) {
       layout.caption_italic = image_caption_italic;
 
       prompt_ui->set_artwork_provider(
-          [image_path](int max_width, int max_height) {
-            return cform::render_artwork_file(image_path, max_width, max_height);
+          [image_path, use_terminal_theme](int max_width, int max_height) {
+            return cform::render_artwork_file(image_path, max_width, max_height,
+                                              use_terminal_theme);
           },
           layout);
       if (!prompt_ui->refresh_artwork()) {

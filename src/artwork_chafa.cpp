@@ -17,7 +17,8 @@
 namespace cform {
 
 std::optional<Artwork> render_artwork_file(const std::string& path,
-                                           int max_width, int max_height) {
+                                           int max_width, int max_height,
+                                           bool use_terminal_theme) {
   if (max_width <= 0 || max_height <= 0) return std::nullopt;
 
   int image_width = 0;
@@ -41,7 +42,11 @@ std::optional<Artwork> render_artwork_file(const std::string& path,
   ChafaCanvasConfig* config = chafa_canvas_config_new();
   chafa_canvas_config_set_cell_geometry(config, 8, 16);
   chafa_canvas_config_set_geometry(config, canvas_width, canvas_height);
-  chafa_canvas_config_set_canvas_mode(config, CHAFA_CANVAS_MODE_TRUECOLOR);
+  chafa_canvas_config_set_canvas_mode(
+      config, use_terminal_theme ? CHAFA_CANVAS_MODE_INDEXED_16
+                                 : CHAFA_CANVAS_MODE_TRUECOLOR);
+  if (use_terminal_theme)
+    chafa_canvas_config_set_preprocessing_enabled(config, TRUE);
   chafa_canvas_config_set_dither_mode(config, CHAFA_DITHER_MODE_NONE);
 
   ChafaCanvas* canvas = chafa_canvas_new(config);

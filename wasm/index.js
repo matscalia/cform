@@ -152,7 +152,9 @@ function renderAnsiSync(image, options, maxWidth, maxHeight) {
         height,
         fontRatio: FONT_RATIO,
         format: chafaModule.ChafaPixelMode.CHAFA_PIXEL_MODE_SYMBOLS.value,
-        colors: chafaModule.ChafaCanvasMode.CHAFA_CANVAS_MODE_TRUECOLOR.value,
+        colors: options.useTerminalTheme
+          ? chafaModule.ChafaCanvasMode.CHAFA_CANVAS_MODE_INDEXED_16.value
+          : chafaModule.ChafaCanvasMode.CHAFA_CANVAS_MODE_TRUECOLOR.value,
         fill: 'none',
         symbols: 'block+border+space-wide-inverted',
         preprocess: true,

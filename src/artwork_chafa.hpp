@@ -9,8 +9,11 @@
 namespace cform {
 
 /// Renders `path` into at most `width` x `height` terminal cells.
-/// Returns nullopt when the image cannot be read.
+/// When `use_terminal_theme` is true, colors are mapped to the terminal's
+/// 16-color ANSI palette instead of truecolor. Returns nullopt when the image
+/// cannot be read.
 std::optional<Artwork> render_artwork_file(const std::string& path, int width,
-                                           int height);
+                                           int height,
+                                           bool use_terminal_theme = false);
 
 }  // namespace cform

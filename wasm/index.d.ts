@@ -32,6 +32,8 @@ export interface CformOptions {
   /** Image shown on the right when it fits. A filesystem path or the already
    * decoded image bytes (PNG/JPEG/WebP). Requires `chafa-wasm`. */
   image?: string | Uint8Array | ArrayBuffer;
+  /** Render image colors with the terminal's 16-color palette instead of truecolor. */
+  useTerminalTheme?: boolean;
   /** Rendered image size in terminal cells (defaults to the full TUI height,
    * preserving the source aspect ratio). */
   imageWidth?: number;

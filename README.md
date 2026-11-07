@@ -74,10 +74,17 @@ Images use the same libchafa as the CLI, via the `chafa-wasm` package:
 
 ```js
 const cform = await loadCform({ image: 'logo.png' });
+// render using the terminal's 16-color palette instead of truecolor:
+const themed = await loadCform({ image: 'logo.png', useTerminalTheme: true });
 // or, rendered before a later run:
 await cform.prepareImage('logo.png');
 cform.clearImage();
 ```
+
+By default chafa emits truecolor RGB values. With `useTerminalTheme: true`
+(or `--use-terminal-theme`), it maps the image to the terminal's 16 ANSI
+colors, so the actual red/green/blue values follow the user's terminal theme
+instead of the source image's exact colors.
 
 The image is right-aligned inside the frame only when the terminal has room
 for it **and** it is at least `imageMinWidth` x `imageMinHeight` cells. It is
@@ -166,6 +173,9 @@ usage: cform [options] [document]
   --base-dir <dir>  directory used for relative path completion
   --prompt          start by prompting the root; ctrl+f returns to the tree
   --image <file>    right-aligned image, when the terminal has room (chafa)
+  --use-terminal-theme
+                    render image colors with the terminal's 16-color palette
+                    instead of truecolor
   --image-min-width <n>, --image-min-height <n>
                     hide below this rendered cell size (default 8x4)
   --image-min-content-width <n>
