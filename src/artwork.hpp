@@ -9,6 +9,10 @@
 
 namespace cform {
 
+/// Special caption background values (all other non-negative values are RGB).
+inline constexpr int kCaptionBackgroundKeep = -1;
+inline constexpr int kCaptionBackgroundTerminal = -2;
+
 struct Artwork {
   int width = 0;   // terminal cells
   int height = 0;  // rows
@@ -47,7 +51,8 @@ struct ArtworkLayout {
   ArtworkAlign caption_align = ArtworkAlign::Center;
   int caption_padding = 1;
   int caption_fg = 0xFFFFFF;  // packed 0xRRGGBB; negative = keep image fg
-  int caption_bg = 0x000000;  // packed 0xRRGGBB; negative = keep image bg
+  int caption_bg = 0x000000;  // packed 0xRRGGBB; -1 = keep image bg,
+                              // -2 = terminal/default background
   bool caption_bold = false;
   bool caption_italic = false;
 };

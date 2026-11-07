@@ -195,7 +195,11 @@ void apply_artwork_caption(Artwork& artwork, const ArtworkLayout& layout) {
   if (layout.caption_bold) style += "\x1b[1m";
   if (layout.caption_italic) style += "\x1b[3m";
   style += sgr_color(foreground, false);
-  if (layout.caption_bg >= 0) style += sgr_color(layout.caption_bg, true);
+  if (layout.caption_bg >= 0) {
+    style += sgr_color(layout.caption_bg, true);
+  } else if (layout.caption_bg == kCaptionBackgroundTerminal) {
+    style += "\x1b[49m";  // terminal/default background
+  }
 
   for (int index = 0; index < count; index++) {
     std::string text = clip_caption(lines[index], available);
@@ -207,7 +211,8 @@ void apply_artwork_caption(Artwork& artwork, const ArtworkLayout& layout) {
       offset = artwork.width - padding - cells;
     }
     offset = std::max(0, std::min(offset, artwork.width - cells));
-    if (layout.caption_bg < 0) {
+    if (layout.caption_bg < 0 &&
+        layout.caption_bg != kCaptionBackgroundTerminal) {
       overlay_preserving_background(artwork.lines[first + index], text, offset,
                                     layout.caption_fg, layout.caption_bold,
                                     layout.caption_italic);

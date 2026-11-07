@@ -60,9 +60,10 @@ void usage(std::ostream& out) {
          "  --image-caption-padding <n>\n"
          "                    cells between caption and image edge (default 1)\n"
          "  --image-caption-color <rrggbb|none|transparent>,\n"
-         "  --image-caption-bg <rrggbb|none|transparent>\n"
+         "  --image-caption-bg <rrggbb|none|transparent|terminal>\n"
          "                    caption colors (default ffffff on 000000;\n"
-         "                    none/transparent keep the image color)\n"
+         "                    none/transparent keep the image color; terminal\n"
+         "                    uses the terminal's background)\n"
          "  --image-caption-bold, --image-caption-italic\n"
          "                    caption font style (combine for both)\n";
 }
@@ -219,7 +220,9 @@ int main(int argc, char** argv) {
         }
       } else if (argument == "--image-caption-bg") {
         if (value == "none" || value == "transparent") {
-          image_caption_bg = -1;
+          image_caption_bg = cform::kCaptionBackgroundKeep;
+        } else if (value == "terminal") {
+          image_caption_bg = cform::kCaptionBackgroundTerminal;
         } else if (!parse_color(value, image_caption_bg)) {
           std::cerr << "cform: invalid color for --image-caption-bg: " << value << "\n";
           return 2;

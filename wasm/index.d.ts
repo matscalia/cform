@@ -57,7 +57,7 @@ export interface CformOptions {
   imageCaptionPadding?: number;
   /** `#rrggbb`/`rrggbb`, packed number, default white; `none`/`transparent` keeps the image fg. */
   imageCaptionColor?: string | number;
-  /** `#rrggbb`/`rrggbb`, packed number, or `none`/`transparent` (keeps the image bg). */
+  /** `#rrggbb`/`rrggbb`, packed number, `none`/`transparent` (keeps the image bg), or `terminal` (uses the terminal background). */
   imageCaptionBackground?: string | number;
   /** Bold caption text. */
   imageCaptionBold?: boolean;

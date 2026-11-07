@@ -1200,6 +1200,26 @@ void test_artwork() {
         preserved.lines[0].find("\x1b[22m") != std::string::npos &&
             preserved.lines[0].find("\x1b[23m") != std::string::npos);
 
+  Artwork terminal_bg;
+  terminal_bg.width = 4;
+  terminal_bg.height = 1;
+  terminal_bg.lines = {
+      "\x1b[0m\x1b[38;2;1;2;3m\x1b[48;2;4;5;6mabcd"};
+  layout.caption = "X";
+  layout.caption_position = 0.0f;
+  layout.caption_align = ArtworkAlign::Left;
+  layout.caption_padding = 0;
+  layout.caption_fg = 0xFFFFFF;
+  layout.caption_bold = false;
+  layout.caption_italic = false;
+  layout.caption_bg = kCaptionBackgroundTerminal;
+  apply_artwork_caption(terminal_bg, layout);
+  check("artwork: terminal caption background",
+        terminal_bg.lines[0].find("\x1b[49m") != std::string::npos);
+  check("artwork: terminal caption replaces image background",
+        terminal_bg.lines[0].find("48;2;4;5;6") == std::string::npos);
+  check("artwork: terminal caption glyph", strip(terminal_bg.lines[0]) == "X   ");
+
   Artwork styled;
   styled.width = 6;
   styled.height = 1;
@@ -1209,6 +1229,8 @@ void test_artwork() {
   layout.caption_align = ArtworkAlign::Center;
   layout.caption_padding = 0;
   layout.caption_bg = 0x000000;
+  layout.caption_bold = true;
+  layout.caption_italic = true;
   apply_artwork_caption(styled, layout);
   check("artwork: solid caption bold/italic",
         styled.lines[0].find("\x1b[1m") != std::string::npos &&

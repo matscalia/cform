@@ -112,7 +112,8 @@ const cform = await loadCform({
   imageCaptionPosition: 'bottom', // or 'center'/'middle', 'top', 'none', or 0..1
   imageCaptionAlign: 'center',
   imageCaptionColor: '#ffffff',
-  imageCaptionBackground: '#000000', // or 'none'/'transparent' to keep the image background
+  imageCaptionBackground: '#000000', // 'none'/'transparent' keep the image background,
+                                      // 'terminal' uses the terminal background
   imageCaptionBold: true,
   imageCaptionItalic: true,
 });
@@ -127,9 +128,13 @@ CLI flags.
 
 With `imageCaptionBackground: 'none'` or `'transparent'` (or
 `--image-caption-bg none`) the caption is composited cell-by-cell: the glyphs
-are replaced but each cell keeps its original background color. `imageCaptionColor: 'none'` likewise keeps the
-original foreground; by default the text is white. `imageCaptionBold` and
-`imageCaptionItalic` add font styling (set both for bold italic).
+are replaced but each cell keeps its original background color. Use
+`imageCaptionBackground: 'terminal'` (or `--image-caption-bg terminal`) to
+paint the caption row with the terminal's default background instead, which
+adapts to the user's terminal theme. `imageCaptionColor: 'none'` likewise
+keeps the original foreground; by default the text is white.
+`imageCaptionBold` and `imageCaptionItalic` add font styling (set both for
+bold italic).
 
 - The UI is written to `stderr` by default, so `stdout` stays free; pass
   `{ output: process.stdout }`, `{ outputFd: 1 }` or `{ columns }` to
@@ -181,9 +186,10 @@ usage: cform [options] [document]
   --image-caption-padding <n>
                     cells between caption and image edge (default 1)
   --image-caption-color <rrggbb|none|transparent>,
-  --image-caption-bg <rrggbb|none|transparent>
+  --image-caption-bg <rrggbb|none|transparent|terminal>
                     caption colors (default ffffff on 000000;
-                    none/transparent keep the image color)
+                    none/transparent keep the image color; terminal uses
+                    the terminal background)
   --image-caption-bold, --image-caption-italic
                     caption font style (combine for both)
 ```

@@ -491,7 +491,9 @@ async function loadCform(options = {}) {
         artCaptionBg:
           captionBackground === 'none' || captionBackground === 'transparent'
             ? -1
-            : packedColor(captionBackground, 0x000000),
+            : captionBackground === 'terminal'
+              ? -2
+              : packedColor(captionBackground, 0x000000),
         artCaptionBold: !!(runOptions.imageCaptionBold ?? options.imageCaptionBold),
         artCaptionItalic: !!(runOptions.imageCaptionItalic ?? options.imageCaptionItalic),
       });
