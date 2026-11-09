@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Tree screen used when cform edits an existing document: navigate the
 // document tree, see which nodes respect the schema, and pick what to fill.
 #pragma once

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Schema-driven prompt walker: turns a JSON Schema into a sequence of prompts
 // and builds the value. Same traversal, validation and back-navigation rules as
 // the TypeScript implementation.

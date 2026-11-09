@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 'use strict';
 
 // Run with: node wasm/example.js

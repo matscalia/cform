@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Embind entry points for the Node/Wasm build.
 //
 // `run(schema, document, options)` is blocking: it draws the same tree screen

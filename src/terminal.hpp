@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Byte-level terminal + host filesystem operations used by the prompt UI.
 //
 // The native build implements this with termios on /dev/tty. The wasm build

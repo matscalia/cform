@@ -1,8 +1,8 @@
 # cform
 
-C++20 port of the schema-driven prompt utility behind `orchestra prompt`: read
-a JSON Schema from **stdin**, collect a value through interactive prompts on the
-controlling terminal, print the JSON on **stdout**.
+A schema-driven prompt utility: read a JSON Schema from **stdin**, collect a
+value through interactive prompts on the controlling terminal, print the JSON
+on **stdout**.
 
 ```bash
 cform < schema.json > value.json                 # start from an empty value
@@ -12,8 +12,8 @@ cform existing.json < schema.json > value.json   # start from a partially filled
 cform always opens on the tree screen; the optional `document` only seeds it.
 
 Prompts are drawn on `/dev/tty`, so stdout stays clean and redirectable. Editing
-a node uses the same wizard as `orchestra prompt`: same traversal, messages,
-validation and back-navigation.
+a node walks the schema with the same traversal, messages, validation and
+back-navigation.
 
 ## Build
 
@@ -202,9 +202,13 @@ usage: cform [options] [document]
                     the terminal background)
   --image-caption-bold, --image-caption-italic
                     caption font style (combine for both)
+  --version         print the version and exit
+
+SPDX-License-Identifier: MIT
+Copyright (c) 2026 Matteo Scalia
 ```
 
-`orchestra prompt` passes its shipped library path as `--lib-dir`; `--base-dir`
+`--lib-dir` resolves `{lib:...}` references and has no default; `--base-dir`
 defaults to the current directory.
 
 ## Tree screen
@@ -318,3 +322,9 @@ Differences from the TypeScript UI are cosmetic: the banner/error prefix says
 | `src/walker.cpp` | schema walker (prompt order, back navigation, history) |
 | `src/main.cpp` | stdin schema → value → stdout |
 | `test/walker_test.cpp` | scripted-prompter behaviour tests |
+
+## License
+
+cform is released under the MIT License; see `LICENSE`. The help screen ends
+with a short notice (`cform --help`), and `cform --version` prints the version.
+`make install` / `cmake --install` places `LICENSE` under `share/doc/cform`.

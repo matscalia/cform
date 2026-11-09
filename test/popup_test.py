@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Matteo Scalia
+
 """Description-popup tests for the native cform tree."""
 
 import fcntl

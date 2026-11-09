@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // JSON Schema helpers: `$ref` resolution, `allOf` folding, type inspection,
 // validation of prompt answers, and the `patternProperties` literal parser.
 #pragma once

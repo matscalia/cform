@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Minimal ordered JSON value used by cform.
 //
 // simdjson is used to parse (schema, `(json)` prompt answers); values are

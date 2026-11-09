@@ -1,5 +1,8 @@
-// cform: compile a JSON Schema read from stdin into a JSON value through the
-// same schema-driven prompts as `orchestra prompt`.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+//
+// cform: compile a JSON Schema read from stdin into a JSON value through
+// schema-driven interactive prompts.
 //
 // Prompts are drawn on the controlling terminal (/dev/tty) so stdout stays
 // reserved for the resulting JSON.
@@ -24,7 +27,13 @@
 #include "artwork_chafa.hpp"
 #endif
 
+#ifndef CFORM_VERSION
+#define CFORM_VERSION "development"
+#endif
+
 namespace {
+
+constexpr const char* kVersion = CFORM_VERSION;
 
 void usage(std::ostream& out) {
   out << "usage: cform [options] [document]\n"
@@ -68,7 +77,11 @@ void usage(std::ostream& out) {
          "                    none/transparent keep the image color; terminal\n"
          "                    uses the terminal's background)\n"
          "  --image-caption-bold, --image-caption-italic\n"
-         "                    caption font style (combine for both)\n";
+         "                    caption font style (combine for both)\n"
+         "  --version         print the version and exit\n"
+         "\n"
+         "SPDX-License-Identifier: MIT\n"
+         "Copyright (c) 2026 Matteo Scalia\n";
 }
 
 bool parse_int(const std::string& text, int& value) {
@@ -266,6 +279,10 @@ int main(int argc, char** argv) {
     }
     if (argument == "-h" || argument == "--help") {
       usage(std::cout);
+      return 0;
+    }
+    if (argument == "--version" || argument == "-V") {
+      std::cout << "cform " << kVersion << "\n";
       return 0;
     }
     if (!argument.empty() && argument[0] == '-') {

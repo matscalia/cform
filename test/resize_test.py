@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Matteo Scalia
+
 """Independent width/height terminal-resize tests for the native cform CLI.
 
 The test drives cform through a pty and resizes it without sending a keypress.

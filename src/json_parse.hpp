@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Dependency-free JSON parser used by builds without simdjson (the wasm
 // module). It produces the same ordered cform::Json model as the simdjson path.
 #pragma once

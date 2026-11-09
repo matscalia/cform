@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Native artwork renderer: image file -> ANSI via libchafa.
 #pragma once
 

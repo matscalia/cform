@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Pre-rendered ANSI artwork (e.g. from libchafa) that the prompt UI can show
 // on the right side of its frame.
 #pragma once

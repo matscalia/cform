@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Terminal UI of cform: the same prompt kinds and rendering as the TypeScript
 // implementation, without any third-party TUI library.
 #pragma once

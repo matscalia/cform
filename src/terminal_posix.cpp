@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Native terminal backend: raw mode and sizing through termios/ioctl on the
 // controlling terminal (/dev/tty), like the original single-file TUI.
 #include "terminal.hpp"

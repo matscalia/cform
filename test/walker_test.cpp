@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Behaviour tests for the cform walker (no TTY needed: a scripted prompter is
 // injected). Mirrors the TypeScript test suite.
 #include <algorithm>
@@ -313,7 +316,7 @@ void test_object_prompts() {
     }
   })");
   Script script;
-  script.text["name"] = {{false, "orchestra"}};
+  script.text["name"] = {{false, "cform"}};
   script.select["select mode"] = {1};
   script.confirm["set tags?"] = {1};
   script.text["tags[0]"] = {{false, "ai"}};
@@ -326,7 +329,7 @@ void test_object_prompts() {
 
   const Run result = run(root, script);
   const Json expected = parse(
-      R"({"name":"orchestra","retries":0,"mode":"slow","tags":["ai"],"env":{"A":"1"}})");
+      R"({"name":"cform","retries":0,"mode":"slow","tags":["ai"],"env":{"A":"1"}})");
   check("object: builds a value from every prompt kind",
         same(result.value, expected));
   check("object: declined optional fields are omitted",

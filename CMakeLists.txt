@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Matteo Scalia
+
 cmake_minimum_required(VERSION 3.20)
-project(cform LANGUAGES CXX)
+project(cform VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,6 +65,8 @@ else()
   target_link_libraries(cform PRIVATE cform_core)
   target_compile_options(cform PRIVATE -Wall -Wextra)
 
+  target_compile_definitions(cform PRIVATE CFORM_VERSION="${PROJECT_VERSION}")
+
   # Optional: libchafa renders the right-side artwork from an image file.
   pkg_check_modules(CHAFA chafa>=1.6 IMPORTED_TARGET)
   if(CHAFA_FOUND)
@@ -108,4 +113,10 @@ else()
               $<TARGET_FILE:cform>
     )
   endif()
+
+  # Ship the license next to the installed binary so distributed builds carry
+  # the required notice.
+  include(GNUInstallDirs)
+  install(TARGETS cform RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 endif()

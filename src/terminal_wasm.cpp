@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Matteo Scalia
+
 // Wasm/Node terminal backend.
 //
 // The C++ TUI keeps all of its rendering and key-decoding logic; this class
