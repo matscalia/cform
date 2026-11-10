@@ -80,7 +80,7 @@ void usage(std::ostream& out) {
          "                    caption font style (combine for both)\n"
          "  --version         print the version and exit\n"
          "\n"
-         "SPDX-License-Identifier: MIT\n"
+         "License: MIT\n"
          "Copyright (c) 2026 Matteo Scalia\n";
 }
 
