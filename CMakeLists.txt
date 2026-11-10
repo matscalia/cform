@@ -13,17 +13,35 @@ if(EMSCRIPTEN)
   add_compile_options(-fexceptions -Wall -Wextra)
   add_link_options(-fexceptions -sDISABLE_EXCEPTION_CATCHING=0)
 
+  # simdjson has no wasm SIMD kernel, so the single-header build settles on its
+  # portable `fallback` implementation (still faster than a naive parser, and
+  # it keeps the native and wasm parsers identical). Fetched at configure time;
+  # the version is pinned so repeated builds stay reproducible.
+  include(FetchContent)
+  FetchContent_Declare(
+    simdjson_singleheader
+    URL https://github.com/simdjson/simdjson/releases/download/v5.0.5/singleheader.zip
+    URL_HASH SHA256=61637ec0a119676a15ccb039576b3c566d9ebba722d5d17b74d3221a4f176b5a
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(simdjson_singleheader)
+  set(SIMDJSON_SINGLEHEADER_DIR "${simdjson_singleheader_SOURCE_DIR}")
+  set(SIMDJSON_SINGLEHEADER_SRC "${SIMDJSON_SINGLEHEADER_DIR}/simdjson.cpp")
+  # Vendored code: do not let its warnings drown ours.
+  set_source_files_properties("${SIMDJSON_SINGLEHEADER_SRC}"
+                              PROPERTIES COMPILE_OPTIONS "-w")
+
   add_library(cform_core STATIC
     src/artwork.cpp
     src/json.cpp
-    src/json_parse.cpp
+    ${SIMDJSON_SINGLEHEADER_SRC}
     src/schema.cpp
     src/tui.cpp
     src/tree.cpp
     src/walker.cpp
     src/terminal_wasm.cpp
   )
-  target_include_directories(cform_core PUBLIC src)
+  target_include_directories(cform_core PUBLIC src ${SIMDJSON_SINGLEHEADER_DIR})
 
   add_executable(cform_wasm wasm/bindings.cpp)
   target_link_libraries(cform_wasm PRIVATE cform_core)
@@ -57,7 +75,6 @@ else()
     src/terminal_posix.cpp
   )
   target_include_directories(cform_core PUBLIC src)
-  target_compile_definitions(cform_core PUBLIC CFORM_USE_SIMDJSON=1)
   target_link_libraries(cform_core PUBLIC PkgConfig::SIMDJSON)
   target_compile_options(cform_core PRIVATE -Wall -Wextra)
 
