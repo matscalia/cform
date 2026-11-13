@@ -51,7 +51,7 @@ std::string short_value(const Json &value, std::size_t max = 32) {
     text = "[" + std::to_string(value.array.size()) + "]";
   }
   if (text.size() > max)
-    text = text.substr(0, max - 1) + "…";
+    text = text.substr(0, max - 1) + "...";
   return text;
 }
 
