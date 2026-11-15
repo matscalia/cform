@@ -68,7 +68,7 @@ export interface CformOptions {
   imageCaptionBold?: boolean;
   /** Italic caption text. */
   imageCaptionItalic?: boolean;
-  /** Editor command used by multiline prompts (defaults to `$VISUAL`, `$EDITOR`, `vi`). */
+  /** Editor command opened by ctrl+g (defaults to `$VISUAL`, `$EDITOR`, `vi`). */
   editor?: string;
 }
 

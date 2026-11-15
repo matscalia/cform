@@ -196,24 +196,6 @@ Outcome Walker::leaf(const Json& schema, const Path& path,
                                  : std::optional<std::string>(known.front()));
   const std::optional<std::string>& initial = prefilled;
 
-  const Json* format = node.get("format");
-  const bool multiline =
-      primary_type(node, root_) == "string" && format && format->is_string() &&
-      (format->string == "multiline" || format->string == "textarea");
-  if (multiline) {
-    TextPrompt prompt;
-    prompt.message = label;
-    prompt.hint = hint;
-    prompt.multiline = true;
-    prompt.placeholder = schema_default;
-    prompt.default_value = schema_default;
-    prompt.initial_value = initial;
-    prompt.validate = validate_string(node, root_);
-    const auto reply = prompter_.text(prompt);
-    if (reply.back) return Outcome::back();
-    return Outcome::of(Json::string_value(reply.value));
-  }
-
   if (const Json* constant = node.get("const")) return Outcome::of(*constant);
 
   if (const Json* enum_values = node.get("enum");
@@ -441,8 +423,8 @@ Outcome Walker::object(const Json& schema, const Path& path,
     const Json* current_schema =
         current_properties ? current_properties->get(key) : nullptr;
     if (!current_schema) {
-      // A conditional branch changed and this property is no longer part of
-      // the applicable schema.
+      // A conditional branch changed and this property is not part of the
+      // applicable schema.
       index++;
       continue;
     }

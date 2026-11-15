@@ -136,7 +136,7 @@ def main():
     try:
         checks = []
         # Height-only resize with a portrait image and a row that fits at 24
-        # rows but not at 40 rows. This used to hide the artwork.
+        # rows but not at 40 rows; the artwork must stay visible.
         checks.append(
             ("height-only, long row", portrait, long_row, (80, 24), (80, 40))
         )

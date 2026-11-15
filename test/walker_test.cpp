@@ -530,6 +530,16 @@ void test_number_constraints() {
   }
 }
 
+void test_multiline_format_is_text_prompt() {
+  const Json root = parse(
+      R"({"type":"object","required":["text"],"properties":{"text":{"type":"string","format":"multiline"}}})");
+  Script script;
+  script.text["text"] = {{false, "line one\nline two"}};
+  const Run result = run(root, script);
+  check("format multiline: uses the normal text prompt",
+        same(result.value, parse(R"({"text":"line one\nline two"})")));
+}
+
 void test_allof_and_refs() {
   const Json root = parse(R"({
     "$defs": {"base": {"type":"object","required":["base"],
@@ -1256,6 +1266,7 @@ int main() {
   test_back_navigation();
   test_group_resume();
   test_number_constraints();
+  test_multiline_format_is_text_prompt();
   test_allof_and_refs();
   test_validate_value();
   test_conditionals_validation();

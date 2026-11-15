@@ -138,15 +138,34 @@ std::vector<std::string> wrap_text(std::string_view text, std::size_t width) {
   std::string line;
   std::size_t line_cells = 0;
   std::size_t index = 0;
+  auto flush_line = [&]() {
+    lines.push_back(line);
+    line.clear();
+    line_cells = 0;
+  };
   while (index < text.size()) {
-    while (index < text.size() &&
-           std::isspace(static_cast<unsigned char>(text[index])))
+    const char ch = text[index];
+    // Explicit line breaks are preserved: descriptions may be multiline.
+    if (ch == '\n' || ch == '\r') {
+      flush_line();
+      if (ch == '\r' && index + 1 < text.size() && text[index + 1] == '\n')
+        index += 2;
+      else
+        index++;
+      continue;
+    }
+    if (std::isspace(static_cast<unsigned char>(ch))) {
       index++;
-    if (index >= text.size()) break;
+      continue;
+    }
     const std::size_t start = index;
-    while (index < text.size() &&
-           !std::isspace(static_cast<unsigned char>(text[index])))
+    while (index < text.size()) {
+      const char current = text[index];
+      if (current == '\n' || current == '\r' ||
+          std::isspace(static_cast<unsigned char>(current)))
+        break;
       index++;
+    }
     const std::string_view word = text.substr(start, index - start);
     const std::size_t word_cells =
         static_cast<std::size_t>(artwork_cell_width(word));
@@ -165,17 +184,18 @@ std::vector<std::string> wrap_text(std::string_view text, std::size_t width) {
     if (line_cells > 0) {
       lines.push_back(line);
       line.clear();
+      line_cells = 0;
     }
 
     // Break a word that is wider than the available columns.
     std::string chunk;
     std::size_t chunk_cells = 0;
     for (std::size_t word_index = 0; word_index < word.size();) {
-      const unsigned char ch = static_cast<unsigned char>(word[word_index]);
+      const unsigned char code = static_cast<unsigned char>(word[word_index]);
       std::size_t length = 1;
-      if ((ch & 0xE0) == 0xC0) length = 2;
-      else if ((ch & 0xF0) == 0xE0) length = 3;
-      else if ((ch & 0xF8) == 0xF0) length = 4;
+      if ((code & 0xE0) == 0xC0) length = 2;
+      else if ((code & 0xF0) == 0xE0) length = 3;
+      else if ((code & 0xF8) == 0xF0) length = 4;
       if (word_index + length > word.size()) length = 1;
       if (chunk_cells + 1 > width) {
         lines.push_back(chunk);
@@ -204,6 +224,96 @@ std::pair<std::string, std::string> first_codepoint(const std::string& text) {
   else if ((ch & 0xF8) == 0xF0) length = 4;
   if (length > text.size()) length = 1;
   return {text.substr(0, length), text.substr(length)};
+}
+
+std::vector<std::string> split_fields(const std::string& params) {
+  std::vector<std::string> fields;
+  std::string current;
+  for (char ch : params) {
+    if (ch == ';') {
+      fields.push_back(current);
+      current.clear();
+    } else {
+      current += ch;
+    }
+  }
+  fields.push_back(current);
+  return fields;
+}
+
+std::string before_colon(std::string field) {
+  const std::size_t colon = field.find(':');
+  if (colon != std::string::npos) field.resize(colon);
+  return field;
+}
+
+bool parse_decimal(const std::string& text, unsigned long& value) {
+  if (text.empty()) return false;
+  char* end = nullptr;
+  value = std::strtoul(text.c_str(), &end, 10);
+  return end && *end == '\0';
+}
+
+std::string utf8_encode(unsigned long codepoint) {
+  std::string out;
+  if (codepoint <= 0x7F) {
+    out += static_cast<char>(codepoint);
+  } else if (codepoint <= 0x7FF) {
+    out += static_cast<char>(0xC0 | (codepoint >> 6));
+    out += static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else if (codepoint <= 0xFFFF) {
+    out += static_cast<char>(0xE0 | (codepoint >> 12));
+    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    out += static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else if (codepoint <= 0x10FFFF) {
+    out += static_cast<char>(0xF0 | (codepoint >> 18));
+    out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    out += static_cast<char>(0x80 | (codepoint & 0x3F));
+  }
+  return out;
+}
+
+Key key_from_codepoint(unsigned long codepoint, unsigned long modifier) {
+  Key key;
+  if (modifier > 0) {
+    const unsigned long bits = modifier - 1;
+    key.ctrl = (bits & 4) != 0;
+  }
+  if (codepoint < 0x20 || codepoint == 0x7F) return key;
+  key.str = utf8_encode(codepoint);
+  if (key.str.empty()) return key;
+  key.has_str = !key.ctrl;
+  key.name = key.str == " " ? "space" : key.str;
+  return key;
+}
+
+/// Kitty's `CSI codepoint;modifiers u` and xterm's
+/// `CSI 27;modifiers;codepoint ~` carry a Ctrl modifier bit.
+bool parse_extended_key(const std::string& params, char final, Key& key) {
+  const std::vector<std::string> fields = split_fields(params);
+  if (final == 'u') {
+    unsigned long codepoint = 0;
+    if (fields.empty() ||
+        !parse_decimal(before_colon(fields[0]), codepoint))
+      return false;
+    unsigned long modifier = 1;
+    if (fields.size() > 1)
+      parse_decimal(before_colon(fields[1]), modifier);
+    key = key_from_codepoint(codepoint, modifier);
+    return true;
+  }
+  if (final == '~' && fields.size() >= 3 &&
+      before_colon(fields[0]) == "27") {
+    unsigned long modifier = 1;
+    unsigned long codepoint = 0;
+    if (!parse_decimal(before_colon(fields[1]), modifier) ||
+        !parse_decimal(before_colon(fields[2]), codepoint))
+      return false;
+    key = key_from_codepoint(codepoint, modifier);
+    return true;
+  }
+  return false;
 }
 
 std::vector<std::string> path_completions(const std::string& input,
@@ -356,16 +466,39 @@ Window window_of(const std::vector<std::string>& items, int index,
   return window;
 }
 
+std::string display_value(const std::string& value) {
+  const std::size_t newline = value.find('\n');
+  if (newline == std::string::npos) return value;
+  std::string first = value.substr(0, newline);
+  if (!first.empty() && first.back() == '\r') first.pop_back();
+  const std::size_t extra =
+      static_cast<std::size_t>(std::count(value.begin(), value.end(), '\n'));
+  return first + dim(" (+" + std::to_string(extra) + " lines)");
+}
+
 std::string render_input(const std::string& value, std::size_t cursor,
                          const std::optional<std::string>& ghost,
                          const std::optional<std::string>& placeholder) {
   if (value.empty()) {
     if (placeholder && !placeholder->empty()) {
+      if (placeholder->find('\n') != std::string::npos)
+        return dim(display_value(*placeholder));
       auto [head, tail] = first_codepoint(*placeholder);
       return std::string(REVERSE) + head + RESET + DIM + tail + RESET;
     }
     std::string out = std::string(REVERSE) + " " + RESET;
-    if (ghost) out += DIM + *ghost + RESET;
+    if (ghost) out += dim(display_value(*ghost));
+    return out;
+  }
+  const std::size_t newline = value.find('\n');
+  if (newline != std::string::npos) {
+    std::string first = value.substr(0, newline);
+    if (!first.empty() && first.back() == '\r') first.pop_back();
+    std::string out = render_input(first, std::min(cursor, first.size()),
+                                   std::nullopt, std::nullopt);
+    const std::size_t extra =
+        static_cast<std::size_t>(std::count(value.begin(), value.end(), '\n'));
+    out += dim(" (+" + std::to_string(extra) + " lines)");
     return out;
   }
   const std::string before = value.substr(0, cursor);
@@ -374,7 +507,7 @@ std::string render_input(const std::string& value, std::size_t cursor,
   const std::string caret = at.empty() ? std::string(REVERSE) + " " + RESET
                                        : std::string(REVERSE) + at + RESET;
   std::string out = before + caret + after;
-  if (ghost) out += DIM + *ghost + RESET;
+  if (ghost) out += dim(display_value(*ghost));
   return out;
 }
 
@@ -819,19 +952,39 @@ struct PromptUI::Impl {
     last_terminal_rows = static_cast<int>(height);
   }
 
+  void push_history(const std::string& line) {
+    history.push_back(line);
+    constexpr std::size_t kMaxHistory = 2048;
+    if (history.size() > kMaxHistory) {
+      history.erase(history.begin(),
+                    history.begin() +
+                        static_cast<std::ptrdiff_t>(history.size() - kMaxHistory));
+    }
+  }
+
   void commit(const std::string& line) {
     if (history_mode) {
-      history.push_back(line);
-      constexpr std::size_t kMaxHistory = 2048;
-      if (history.size() > kMaxHistory) {
-        history.erase(history.begin(),
-                      history.begin() +
-                          static_cast<std::ptrdiff_t>(history.size() - kMaxHistory));
-      }
+      push_history(line);
       return;
     }
     clear();
     write_all(fit_line(line, columns()) + "\r\n");
+  }
+
+  void commit_lines(const std::vector<std::string>& lines) {
+    if (lines.empty()) return;
+    if (history_mode) {
+      for (const std::string& line : lines) push_history(line);
+      return;
+    }
+    clear();
+    std::string out;
+    for (std::size_t index = 0; index < lines.size(); index++) {
+      if (index > 0) out += "\r\n";
+      out += fit_line(lines[index], columns());
+    }
+    out += "\r\n";
+    write_all(out);
   }
 
   void close() {
@@ -853,7 +1006,7 @@ struct PromptUI::Impl {
           std::string params;
           while (cursor < chunk.size() &&
                  (std::isdigit(static_cast<unsigned char>(chunk[cursor])) ||
-                  chunk[cursor] == ';')) {
+                  chunk[cursor] == ';' || chunk[cursor] == ':')) {
             params += chunk[cursor];
             cursor++;
           }
@@ -863,6 +1016,12 @@ struct PromptUI::Impl {
           }
           const char final = chunk[cursor];
           if (std::isalpha(static_cast<unsigned char>(final)) || final == '~') {
+            Key extended;
+            if (parse_extended_key(params, final, extended)) {
+              keys.push_back(std::move(extended));
+              index = cursor + 1;
+              continue;
+            }
             std::string name;
             if (final == 'A') name = "up";
             else if (final == 'B') name = "down";
@@ -935,6 +1094,10 @@ struct PromptUI::Impl {
         case '\x7f':
         case '\b':
           event.name = "backspace";
+          break;
+        case '\x07':
+          event.name = "g";
+          event.ctrl = true;
           break;
         case '\x03':
           event.name = "c";
@@ -1147,7 +1310,18 @@ struct PromptUI::Impl {
   Reply<int> select(const SelectPrompt& prompt);
   Reply<std::vector<int>> multiselect(const MultiSelectPrompt& prompt);
   Reply<bool> confirm(const ConfirmPrompt& prompt);
-  Reply<std::string> editor(const TextPrompt& prompt);
+
+  bool open_editor(const std::string& initial, std::string& value) {
+    set_raw(false);
+    write_all(SHOW_CURSOR);
+    const bool edited = terminal->edit(initial, value);
+    set_raw(true);
+    write_all(HIDE_CURSOR);
+    if (!edited) return false;
+    if (!value.empty() && value.back() == '\n') value.pop_back();
+    if (!value.empty() && value.back() == '\r') value.pop_back();
+    return true;
+  }
 
   std::string summary(const std::string& label, const std::string& value) {
     return cyan(label) + ": " + value;
@@ -1155,7 +1329,6 @@ struct PromptUI::Impl {
 };
 
 Reply<std::string> PromptUI::Impl::text(const TextPrompt& prompt) {
-  if (prompt.multiline) return editor(prompt);
   struct State {
     std::string typed;
     std::size_t cursor = 0;
@@ -1219,6 +1392,19 @@ Reply<std::string> PromptUI::Impl::text(const TextPrompt& prompt) {
 
     Key key = next_key();
     apply_key_policy(key);
+    if (key.ctrl &&
+        (key.name == "g" || (key.has_str && key.str == "g"))) {
+      std::string edited;
+      if (!open_editor(value, edited)) {
+        error = "no external editor available";
+        continue;
+      }
+      state.typed = std::move(edited);
+      state.cursor = state.typed.size();
+      state.pick = -1;
+      error.reset();
+      continue;
+    }
     if (key.name == "escape") {
       commit(dim("‹ back"));
       return {std::string(), true};
@@ -1237,7 +1423,8 @@ Reply<std::string> PromptUI::Impl::text(const TextPrompt& prompt) {
         }
       }
       commit(summary(prompt.message,
-                     value_to_submit.empty() ? dim("(empty)") : value_to_submit));
+                     value_to_submit.empty() ? dim("(empty)")
+                                              : display_value(value_to_submit)));
       return {value_to_submit, false};
     }
     if (key.name == "tab") {
@@ -1588,67 +1775,6 @@ Reply<bool> PromptUI::Impl::confirm(const ConfirmPrompt& prompt) {
   }
 }
 
-Reply<std::string> PromptUI::Impl::editor(const TextPrompt& prompt) {
-  const std::string initial = prompt.initial_value.value_or("");
-  const std::size_t line_count =
-      initial.empty() ? 0 : 1 + static_cast<std::size_t>(
-                                     std::count(initial.begin(), initial.end(), '\n'));
-  const std::string editor_command = terminal->editor_name();
-  for (;;) {
-    std::vector<std::string> lines;
-    append_hint(lines, prompt.hint);
-    std::string status = initial.empty()
-                             ? "empty"
-                             : std::to_string(line_count) + " line" +
-                                   (line_count == 1 ? "" : "s");
-    lines.push_back(cyan(prompt.message) + " " + dim(">") + " " +
-                    dim("[" + status + ", enter to edit in " + editor_command + "]"));
-    render(lines);
-
-    Key key = next_key();
-    apply_key_policy(key);
-    if (key.name == "escape") {
-      commit(dim("‹ back"));
-      return {std::string(), true};
-    }
-    if (key.name != "return") continue;
-
-    set_raw(false);
-    write_all(SHOW_CURSOR);
-    std::string value;
-    if (!terminal->edit(initial, value)) {
-      set_raw(true);
-      write_all(HIDE_CURSOR);
-      throw std::runtime_error("no external editor available");
-    }
-    set_raw(true);
-    write_all(HIDE_CURSOR);
-    if (!value.empty() && value.back() == '\n') value.pop_back();
-
-    std::vector<std::string> value_lines;
-    std::string current;
-    for (char ch : value) {
-      if (ch == '\n') {
-        value_lines.push_back(current);
-        current.clear();
-      } else {
-        current += ch;
-      }
-    }
-    value_lines.push_back(current);
-    const std::size_t extra = value_lines.size() - 1;
-    std::string text;
-    if (value.empty()) {
-      text = dim("(empty)");
-    } else {
-      text = value_lines.front();
-      if (extra > 0) text += dim(" (+" + std::to_string(extra) + " lines)");
-    }
-    commit(summary(prompt.message, text));
-    return {value, false};
-  }
-}
-
 PromptUI::PromptUI(Options options) : impl_(new Impl(std::move(options))) {}
 
 PromptUI::~PromptUI() {
@@ -1706,23 +1832,28 @@ Reply<bool> PromptUI::confirm(const ConfirmPrompt& prompt) {
 
 void PromptUI::note(const std::string& message,
                     const std::optional<std::string>& title) {
-  const std::string body = trim(collapse_whitespace(message));
+  const std::string body = trim(message);
   if (body.empty() && !title) return;
   std::string line;
   if (title) line = *title + ": ";
   line += body;
+  std::vector<std::string> lines;
   for (const std::string& wrapped : wrap_text(line, impl_->note_width()))
-    impl_->commit(dim(wrapped));
+    lines.push_back(dim(wrapped));
+  impl_->commit_lines(lines);
 }
 
 void PromptUI::error(const std::string& message) {
+  std::vector<std::string> lines;
   for (const std::string& wrapped : wrap_text(message, impl_->note_width()))
-    impl_->commit(red(wrapped));
+    lines.push_back(red(wrapped));
+  impl_->commit_lines(lines);
 }
 
 void PromptUI::banner(const std::string& title) {
   std::string legend =
-      "enter accept · tab complete · ↑/↓ cycle · esc back · ctrl-c cancel";
+      "enter accept · tab complete · ↑/↓ cycle · ctrl-g edit · esc back · "
+      "ctrl-c cancel";
   if (impl_->tree_mode) legend += " · ctrl-f tree";
   impl_->write_all(cyan(title) + "\r\n" + dim(legend) + "\r\n");
 }

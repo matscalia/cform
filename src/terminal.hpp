@@ -54,7 +54,7 @@ class Terminal {
   /// editor is available; otherwise stores the edited text in `value`.
   virtual bool edit(const std::string& initial, std::string& value) = 0;
 
-  /// Editor name shown in the multiline prompt hint (e.g. "vi").
+  /// Editor name shown in prompts that open an external editor (e.g. "vi").
   virtual std::string editor_name() = 0;
 };
 

@@ -129,6 +129,18 @@ else()
               ${CMAKE_CURRENT_SOURCE_DIR}/test/popup_test.py
               $<TARGET_FILE:cform>
     )
+    add_test(
+      NAME multiline
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/test/multiline_test.py
+              $<TARGET_FILE:cform>
+    )
+    add_test(
+      NAME editor
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/test/editor_test.py
+              $<TARGET_FILE:cform>
+    )
   endif()
 
   # Ship the license next to the installed binary so distributed builds carry

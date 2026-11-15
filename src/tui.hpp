@@ -29,7 +29,6 @@ struct TextPrompt {
   std::optional<std::string> initial_value;
   std::vector<std::string> suggest;
   bool complete = true;
-  bool multiline = false;
   std::function<std::optional<std::string>(const std::string&)> validate;
 };
 

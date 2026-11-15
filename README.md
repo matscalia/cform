@@ -105,8 +105,8 @@ bold italic).
   `loadCform` to change that.
 - Keys are read from `stdin`, which must be a TTY (Node cannot set raw mode on
   an arbitrary fd), so run the process attached to a terminal.
-- `{file:...}` / `{lib:...}` completion uses Node's `fs`; multiline prompts use
-  `$VISUAL` / `$EDITOR` (or `options.editor`).
+- `{file:...}` / `{lib:...}` completion uses Node's `fs`; the ctrl+g editor
+  uses `$VISUAL` / `$EDITOR` (or `options.editor`).
 
 `run` is synchronous and blocks the event loop while the user is prompted —
 call it from a CLI entry point, not from a request handler.
@@ -262,7 +262,12 @@ invalid values are still accepted (their rows are simply diagnosed).
   tree when editing a document;
 - values the schema does not describe are prompted by inferring their type from
   the document, never as raw JSON (JSON stays available as an explicit choice);
-- `format: "multiline"`/`"textarea"` opens `$VISUAL`/`$EDITOR`.
+- `ctrl+g` in a text prompt opens `$VISUAL`/`$EDITOR` to insert or edit the
+  current value, so multiline values are entered from the editor like any other
+  value;
+- `description` text is shown above prompts, in option hints and in the tree
+  popup with its embedded line breaks preserved, so multiline descriptions
+  stay readable.
 
 ## License
 

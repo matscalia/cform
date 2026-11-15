@@ -219,7 +219,7 @@ void merge_properties(Json& merged, const Json& part,
       // retaining the part's constraints in an allOf.
       props.set(entry.first, combine_schemas(*existing, entry.second));
     } else {
-      // A later allOf part comes first, matching the old precedence.
+      // A later allOf part comes first in the merged schema.
       props.set(entry.first, combine_schemas(entry.second, *existing));
     }
   }
