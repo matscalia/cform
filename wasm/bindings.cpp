@@ -144,10 +144,10 @@ RunResult run(const std::string& schema_text, const std::string& document_text,
       }
     }
 
-    std::string title = "cform";
+    std::string title = "";
     if (const cform::Json* schema_title = schema->get("title");
         schema_title && schema_title->is_string()) {
-      title += " — " + schema_title->string;
+      title = schema_title->string;
     }
     prompt_ui->banner(title);
     if (const cform::Json* description = schema->get("description");
